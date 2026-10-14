@@ -1,0 +1,25 @@
+node_modules/
+dist/
+.vite/
+.vercel/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+Thumbs.db
+opencode.json
+.sisyphus/
+.secrets/
+*.local.json
+
+# Planilhas (dados reais dos diretores) — nunca versionar.
+# A fixture de teste (tests/fixtures/exemplo-planilha.xlsx) contém dados
+# reais e permanece apenas local; os testes unitários/integração que a
+# utilizam rodam somente no ambiente local.
+*.xlsx
+*.xls
+*.csv
+*.zip
+*.bak
+*.tmp
