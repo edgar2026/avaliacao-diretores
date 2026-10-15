@@ -124,8 +124,8 @@ Os dashboards **não usam mais dados locais**: `src/data/initialRows.json` foi r
 - **Consultas eficientes** (`dashboardService.js`): 1 requisição de avaliações + lotes de 20 avaliações para registros (páginas de 500) + lotes de 100 `registro_id` para períodos/indicadores — nunca uma requisição por registro. `dados_originais` (jsonb) **não** é baixado.
 - **Filtros em cascata (sem “Nível de análise”)**: a lateral tem apenas **Regional** e **Diretor**. Estados: todas + todos = consolidado geral · regional + todos = consolidado regional · regional + diretor = perfil individual. Trocar a regional limpa o diretor; o diretor fica desabilitado sem regional; “Todos os diretores” nunca conta como diretor. **Sem filtro de unidade** (unidade aparece em tabelas/detalhes). Títulos automáticos: “Desempenho geral” / “Desempenho da regional” / “Perfil do diretor”.
 - **Contagens de quantidade**: KPIs, resumo lateral e cartões por avaliação usam a função única `countDistinctNames` (`dashboardService.js`) — descarta nulos, vazios e marcadores técnicos ("Diretor não informado", "Unidade não informada"), ignora espaços extras e maiúsculas; **nunca** conta nº de registros. Com a planilha real: **60 diretores** e **60 unidades** (61 registros − 1 marcador).
-- **Comparações**: por avaliação (título · Ttri/ano · nome real do arquivo · diretores · unidades · nível médio); seleção vs consolidado geral (radar); e **“Evolução mensal do diretor”** — **uma única série** (o diretor selecionado; sem consolidado regional nem consolidado geral), eixo X **mensal, pelos cabeçalhos REAIS da planilha** reconhecidos por `parseMonthHeader`/`buildMonthlyLabelMap`/`buildDirectorMonthlyEvolution` (`dashboardService.js`): nome de mês (`JULHO`), data (`JAN DE 2026`, `01/01/2026`) e fechamento de trimestre (`2TRI/25`, `SET/3TRI`, `MAR/1TRI 2026`) viram `MES/AAAA` — com a planilha atual exibe exatamente 16 meses (`JUN/2025` … `SET/2026`), nunca além de SET/2026 e **sem nenhum rótulo `/85` ou data inventada** (ano ausente é inferido na ordem cronológica; ano fora da janela das avaliações é descartado; ano nunca é lido de notas, percentuais ou valores de células). O gráfico **começa no primeiro mês com status ou nível válido daquele diretor** (meses anteriores ficam ocultos) e segue até o último período real da avaliação; lacuna posterior mantém o mês no eixo **sem ponto, sem zero e sem repetição do valor** (linha interrompida). Fechamentos trimestrais usam **marcador dourado maior com contorno**, rótulo “Nº trimestre de AAAA” abaixo do mês e um único ponto. Conversão de níveis via `romanLevel` com **correspondência exata** (mapa I–V, sem reconhecimento parcial de IV como I ou V); **largura responsiva** — `ResizeObserver` mede o container e o gap entre pontos é recalculado dinamicamente para ocupar toda a largura do card (sem rolagem horizontal em resoluções ≥ ~700 px); nível numérico fixo acima de cada ponto, ausência = quebra na linha (nunca 0) e tooltip com mês/ano, status, nível romano, nível numérico e trimestre.
-- **Layout**: **uma única rolagem vertical** da página; lateral simplificada (marca, atualização pela planilha, Regional, Diretor, resumo da seleção, observação e salvar); blocos empilhados em largura total, nesta ordem: **Histórico das avaliações → Evolução mensal do diretor (somente com diretor selecionado) → Comparação de desempenho → Indicadores → Matriz histórica de desempenho**; gráficos com ~430px no desktop (~380px no mobile); radar ampliado e centralizado com legenda abaixo.
+- **Comparações**: por avaliação (título · Ttri/ano · nome real do arquivo · diretores · unidades · nível médio); seleção vs consolidado geral (radar); e **“Evolução mensal do nível de desenvolvimento”** — **uma única série** (o diretor selecionado; sem consolidado regional nem consolidado geral), eixo X **mensal, pelos cabeçalhos REAIS da planilha** reconhecidos por `parseMonthHeader`/`buildMonthlyLabelMap`/`buildDirectorMonthlyEvolution` (`dashboardService.js`): nome de mês (`JULHO`), data (`JAN DE 2026`, `01/01/2026`) e fechamento de trimestre (`2TRI/25`, `SET/3TRI`, `MAR/1TRI 2026`) viram `MES/AAAA` — com a planilha atual exibe exatamente 16 meses (`JUN/2025` … `SET/2026`), nunca além de SET/2026 e **sem nenhum rótulo `/85` ou data inventada** (ano ausente é inferido na ordem cronológica; ano fora da janela das avaliações é descartado; ano nunca é lido de notas, percentuais ou valores de células). O gráfico **começa no primeiro mês com status ou nível válido daquele diretor** (meses anteriores ficam ocultos) e segue até o último período real da avaliação; lacuna posterior mantém o mês no eixo **sem ponto, sem zero e sem repetição do valor** (linha interrompida). Fechamentos trimestrais usam **marcador dourado maior com contorno**, rótulo “Nº trimestre de AAAA” abaixo do mês e um único ponto. Conversão de níveis via `romanLevel` com **correspondência exata** (mapa I–V, sem reconhecimento parcial de IV como I ou V); **largura responsiva** — `ResizeObserver` mede o container e o gap entre pontos é recalculado dinamicamente para ocupar toda a largura do card (sem rolagem horizontal em resoluções ≥ ~700 px); algarismo romano fixo acima de cada ponto, ausência = quebra na linha (nunca 0) e tooltip com mês/ano por extenso, estágio, nível de desenvolvimento em romano e fechamento de trimestre (§16).
+- **Layout**: **uma única rolagem vertical** da página; lateral simplificada (marca, atualização pela planilha, Regional, Diretor, resumo da seleção, observação e salvar); blocos empilhados em largura total, nesta ordem: **Histórico das avaliações → Evolução mensal do nível de desenvolvimento (somente com diretor selecionado) → Comparação de desempenho → Indicadores → Matriz histórica de desempenho**; card de evolução com ~420–430px no desktop e ~400–410px no notebook (altura responsiva no celular), radar mantido em ~430px no desktop (~380px no mobile); radar ampliado e centralizado com legenda abaixo.
 - **Matriz histórica de desempenho** (`src/components/PerformanceMatrix.jsx`): substitui a antiga “Detalhes da seleção” e reproduz a planilha original. Colunas congeladas (Regional · Diretor · Unidade) com rolagem horizontal; **histórico dinâmico** — cada período armazenado vira duas colunas (Status = `periodo.estagio` · Nível = `periodo.nivel`), em ordem (avaliação, `ordem`), rótulo composto quando repetido entre avaliações; **bloco final** separado (Status de gestão = `statusGestao` · Ciclo de vida = `cicloVida` · Nível da unidade = `nivelAtual`) seguido dos 9 indicadores (EAV amigável; ausência = “—”, nunca 0) e de indicadores extras futuros em dinâmico. **8 filtros locais** combinados por AND (Regional, Diretor, Unidade, Período, Status trimestral, Nível, Status de gestão, Ciclo de vida) + “Limpar filtros” + contador “X de Y registros”; o filtro **Período** delimita a casca em que Status trimestral/Nível valem. Helpers puros testáveis em `dashboardService.js` (`matrixPeriodColumns`, `filterMatrixRows`, `formatMetricCell`, `MATRIX_INDICATORS`). Sem mapa de calor nesta etapa.
 - **Estados de tela**: carregando; erro de consulta (com “Tentar novamente”); **vazio informativo** quando não há avaliação publicada; **Error Boundary** (`src/components/ErrorBoundary.jsx`) envolvendo a área principal — um erro de renderização (ex.: gráfico falhando com dados inesperados) mostra um estado de erro recuperável em vez de derrubar o app.
 - **Contrato de métricas**: o modelo do Supabase expõe `metricas` (português); os gráficos leem `r?.metricas?.[n]` com acesso defensivo a `null`/`undefined`.
@@ -235,7 +235,7 @@ O gráfico trimestral foi substituído por uma **linha do tempo mensal individua
 - **Início individual** — para cada diretor: (1) ordenar os períodos cronologicamente; (2) localizar o primeiro mês com **status ou nível válido**; (3) ocultar todos os meses anteriores; (4) iniciar o gráfico nesse mês; (5) seguir até o último período real da avaliação. Exemplo: primeiro dado em MAI/2026 → eixo **MAI/2026 … SET/2026**. Trocar de diretor recalcula o início na hora.
 - **Lacunas depois do início**: o mês **permanece no eixo**, **sem ponto**, **sem zero** e **sem repetir o valor anterior** — a linha é interrompida naquele período (valor `null`).
 - **Fechamentos trimestrais**: JUN/2025, SET/2025, DEZ/2025, MAR/2026, JUN/2026 e SET/2026 recebem **marcador dourado, maior e com contorno** (meses comuns ficam azul-petróleo), o rótulo **“Nº trimestre de AAAA”** (ex.: “3º trimestre de 2026”) logo abaixo do mês e **um único ponto** — não existe segundo ponto para o trimestre.
-- **Apresentação**: título **“Evolução mensal do diretor”** + subtítulo **“Acompanhamento mensal do nível, com destaque para os fechamentos trimestrais.”**; nível numérico fixo sobre cada ponto válido; eixo X em `MES/AAAA` (ex.: SET/2026); tooltip com **mês/ano**, **status daquele período**, **nível romano**, **nível numérico** e **trimestre quando aplicável**; legenda apenas **“Evolução mensal”** e **“Fechamento trimestral”**.
+- **Apresentação** (revisada em 2026-10-15, detalhes no §16): título **“Evolução mensal do nível de desenvolvimento”** + subtítulo **“Progressão do diretor entre os níveis I e V ao longo dos meses avaliados.”** + explicação **“Os níveis representam a classificação de desenvolvimento registrada na planilha e não correspondem às notas dos indicadores.”**; eixo Y rotulado **Nível I … Nível V** (sem números arábicos); **algarismo romano fixo sobre cada ponto válido**; eixo X em `MES/AAAA` (ex.: SET/2026); tooltip com **mês/ano por extenso**, **estágio do período**, **nível de desenvolvimento em romano** e **fechamento do trimestre quando aplicável**; legenda apenas **“Período mensal”** e **“Fechamento trimestral”**.
 - **Leitura dos dados**: exclusivamente o `status` (estágio) e o `nível` do **período correspondente** — nunca status de gestão da unidade, ciclo de vida, nível da unidade, indicadores finais ou valores de outro mês. Níveis convertem por **correspondência exata** `I=1 … V=5` (removidos parênteses/espaços); valor vazio, inválido ou “Não informado” → `null`.
 - **Implementação**: helpers puros em `dashboardService.js` (`parseMonthHeader`, `buildMonthlyLabelMap`, `buildDirectorMonthlyEvolution`) + componente `MonthlyEvolutionChart` em `src/components/Charts.jsx`. `parseQuarterHeader`/`buildQuarterLabelMap` permanecem intactos (testes e demais usos).
 
@@ -376,3 +376,73 @@ Ambos são copiados para `dist/assets/` no build e versionados. Nenhuma planilha
 ### 15.9 Envio ao repositório Git (2026-10-14)
 
 O projeto foi preparado e enviado ao repositório remoto (`origin/main`) após auditoria de segurança: nenhum segredo (`.env`, `service_role`, tokens, planilhas reais) foi versionado; `.gitignore` bloqueia `.env*`, `opencode.json` e todas as planilhas (`*.xlsx`, `*.xls`, `*.csv`). A fixture de teste em `tests/fixtures/` contém dados reais e permanece apenas local. Nenhuma funcionalidade, layout, banco, gráfico, filtro, upload ou observação foi alterado nesta etapa.
+
+## 16. Nomenclatura e apresentação visual do gráfico de evolução mensal (2026-10-15)
+
+Alteração **somente local** de nomenclatura e apresentação do card de evolução mensal. **Nenhum dado, cálculo, período, filtro, indicador, observação, banco, upload ou matriz foi alterado**; sem `git add`/`commit`/`push`, sem atualização do GitHub, sem deploy/redeploy na Vercel e sem mudança de variáveis de ambiente.
+
+### 16.1 Nomenclatura definitiva
+
+| Campo | Texto aplicado |
+|---|---|
+| Título | **“Evolução mensal do nível de desenvolvimento”** (21px, peso 700) |
+| Subtítulo | **“Progressão do diretor entre os níveis I e V ao longo dos meses avaliados.”** (15px, peso 400) |
+| Explicação | **“Os níveis representam a classificação de desenvolvimento registrada na planilha e não correspondem às notas dos indicadores.”** (13,5px, peso 400) — sem novo card, logo abaixo do subtítulo |
+| Eixo vertical | **Nível I, Nível II, Nível III, Nível IV, Nível V** (sem números arábicos) |
+| Rótulos dos pontos | **I, II, III, IV, V** (algarismos romanos; nunca “Nota 2”) |
+| Tooltip | **“Junho de 2026”** (mês/ano por extenso) · **“Estágio: …”** · **“Nível de desenvolvimento: II”** · **“Fechamento do 2º trimestre de 2026”** (quando aplicável) |
+| Legenda | **“Período mensal”** e **“Fechamento trimestral”** (removido “Evolução mensal”, já dito no título) |
+
+Termos proibidos na apresentação deste gráfico: nota, pontuação, média, desempenho numérico, nível consolidado.
+
+### 16.2 Significado dos níveis e diferença entre nível e nota
+
+- **Níveis de desenvolvimento** registrados na planilha: **Nível I, II, III, IV e V**. Internamente continuam **I = 1 … V = 5** (mesmos valores, mesma escala, mesma comparação entre diretores).
+- **Nível ≠ nota**: os valores do gráfico **não são notas** dos indicadores. A nota/pontuação dos indicadores vive em outros blocos (KPIs, radar, matriz histórica); neste gráfico a coluna lida é o **NÍVEL** do período (`romanLevel`, correspondência exata I–V) e o **estágio/status** do período.
+- A cor **dourada** marca apenas **fechamento trimestral** — não indica melhora ou piora.
+- O eixo mantém a escala completa **Nível I → Nível V** em todos os diretores (mesma base para comparação).
+
+### 16.3 Tamanhos de fonte adotados
+
+| Elemento | Desktop | Notebook/mobile |
+|---|---|---|
+| Título | 21px / peso 700 | 20px (≤760px) |
+| Subtítulo | 15px / peso 400 | 14px |
+| Explicação | 13,5px / peso 400 | 13px |
+| Eixo vertical (Nível I…V) | 13px / peso 600 | 12px |
+| Rótulos dos pontos (I…V) | 14px / peso 700 | 13px |
+| Meses (`MES/AAAA`) | 13px / peso 600 | 13px |
+| Fechamentos trimestrais | 12,5px / peso 600 | 12px |
+| Tooltip | 13px (1ª linha 13,5px/peso 700) | 13px |
+| Legenda | 13,5px / peso 500 | 13px |
+
+(O peso 500 foi adicionado ao carregamento do Inter; nenhum outro elemento usa 500, portanto nada mais mudou.)
+
+### 16.4 Linha, marcadores, card e distribuição
+
+- **Linha**: espessura **3,5px** (`.evolution-card .line-path.line-sel`), azul-petróleo `--teal:#087f95`, `stroke-linecap/linejoin: round`, sem sombra; renderização 1:1 (SVG em unidades CSS) — visível também em telas de alta densidade.
+- **Marcadores comuns**: diâmetro **12px** (r=6), azul-petróleo com borda escura discreta (1,5px `#04525f`); **área de interação de 20px** (r=10) via `circle.dot-hit` transparente.
+- **Fechamentos trimestrais**: diâmetro **15px** (r=7,5), dourado `--gold:#d2a42b` com contorno **2,5px** `#7a5a0d`; área de interação **26px** (r=13).
+- **Altura do card**: `.evolution-card .chart` = **280px** no desktop (>1440px), **262px** no notebook (≤1440px) e **300px** no celular — card total em **≈420–430px no desktop** e **≈400–410px no notebook** (título + subtítulo + explicação + gráfico + legenda, sem conteúdo cortado e sem grande espaço vazio); no celular a altura do card é a resultante do conteúdo (responsiva). O card de radar continua com `.chart` 430px/380px (inalterado).
+- **Distribuição interna**: `PAD=72px` de margem esquerda/direita (cabe o “Nº trimestre de AAAA” na borda), `MIN_GAP=96px` e `ResizeObserver` medindo **largura e altura** do container — os pontos ocupam toda a largura útil; eixo Y em SVG próprio de **74px** (“Nível III” não é cortado); o SVG recebe **largura/altura inline (`W×H`)** para manter escala 1:1 (fontes nunca encolhem): quando a largura não comporta os 96px por mês, a rolagem horizontal acontece **somente dentro de `.chart-scroll`** (a página não rola na horizontal) e a altura útil é medida já **descontando a barra de rolagem**, para não cortar os rótulos de trimestre.
+- **Tooltip**: div própria (`.chart-tip`, `position:fixed`) — fundo `#0e2f3b` com texto branco, borda `#cfe1e7`, raio 10px, padding 10×12, largura até 280px, posicionada junto ao cursor e limitada à viewport; substitui o `<title>` nativo.
+
+### 16.5 Regras funcionais preservadas
+
+Card oculto em “Todos os diretores”; visível só com diretor específico; uma única linha; meses anteriores ao início do diretor ocultos; lacunas posteriores sem ponto (linha interrompida, nunca 0 e nunca repetido); ausência não vira Nível I; trimestres destacados somente quando existirem na planilha; nenhum período/data inventado; nenhuma média regional nem consolidado geral.
+
+### 16.6 Arquivos alterados
+
+| Arquivo | O que mudou |
+|---|---|
+| `src/App.jsx` | Título, subtítulo, explicação e legenda do card; classe `evolution-card` para escopar o CSS |
+| `src/components/Charts.jsx` | Eixo Y “Nível I…V”, rótulos romanos nos pontos, marcadores maiores + área de interação, tooltip HTML próprio (mês por extenso / estágio / nível romano / trimestre), altura medida por `ResizeObserver` (largura **e** altura, já sem a barra de rolagem), largura/altura inline do SVG, `PAD=72`, posições de mês e trimestre |
+| `src/styles.css` | Bloco `.evolution-card` (fontes, cores, linha 3,5px, marcadores, alturas 280/262/300px, legenda), `.chart-tip`, peso 500 no Inter |
+| `docs/DOCUMENTACAO_AVALIACAO_DIRETORES.md` | §12 (apresentação, layout) + este §16 |
+
+### 16.7 Resultado dos testes e build (2026-10-15)
+
+- `npm test` ✅ **66/66** (evolução mensal, rótulos de período, trimestres, `romanLevel`, observações, importação — nenhum teste alterado).
+- `npm run build` ✅ (Vite/rolldown: `dist/` gerada; apenas o aviso já existente de chunk >500kB).
+- Smoke de render (script temporário, removido após a checagem): eixo com “Nível I…V” e sem números arábicos; pontos com `I/II/III/IV/V` e sem “Nota”; marcadores `dot-quarter`/`dot-sel` e `dot-hit`; meses `MES/AAAA` e “1º trimestre de 2026”.
+- **Não executado neste passo:** commit, push, atualização do GitHub, deploy/redeploy na Vercel, mudança de variáveis de ambiente.
