@@ -1,10 +1,13 @@
 import { getSupabase } from './supabaseClient.js';
 import { friendlyMetricName, romanLevel } from '../dataParser.js';
+import { valorVigente, nivelExibicao } from './ajustesService.js';
 
 const AV = 'avaliacoes_diretores';
 const REG = 'avaliacoes_diretores_registros';
 const PER = 'avaliacoes_diretores_periodos';
 const IND = 'avaliacoes_diretores_indicadores';
+const AJ = 'avaliacoes_diretores_ajustes';
+const AJI = 'avaliacoes_diretores_indicadores_ajustes';
 
 // Tamanhos de lote/página: nunca uma requisição por registro (sem N+1).
 const PAGE_SIZE = 500;
@@ -52,7 +55,7 @@ export async function loadPublishedDashboard(){
     .order('importado_em', { ascending: true }));
 
   if(avaliacoes.length === 0){
-    return { avaliacoes: [], registros: [], periodos: [], indicadores: [] };
+    return { avaliacoes: [], registros: [], periodos: [], indicadores: [], ajustes: [], ajustesIndicadores: [] };
   }
 
   const registros = [];
@@ -73,7 +76,7 @@ export async function loadPublishedDashboard(){
     const [per, ind] = await Promise.all([
       fetchAll(() => supabase
         .from(PER)
-        .select('id, registro_id, rotulo_periodo, ordem, estagio, nivel')
+        .select('id, registro_id, rotulo_periodo, ordem, estagio, nivel, origem')
         .in('registro_id', lote)
         .order('registro_id', { ascending: true })
         .order('ordem', { ascending: true })),
@@ -88,7 +91,35 @@ export async function loadPublishedDashboard(){
     indicadores.push(...ind);
   }
 
-  return { avaliacoes, registros, periodos, indicadores };
+  // Ajustes manuais de status/nível (camada adicional sobre o dado
+  // importado). Se a consulta falhar (ex.: ambiente sem a tabela), o
+  // dashboard continua normalmente apenas com o valor importado.
+  let ajustes = [];
+  try {
+    ajustes = await fetchAll(() => supabase
+      .from(AJ)
+      .select('id, avaliacao_id, registro_id, periodo_id, status_original, nivel_original, status_ajustado, nivel_ajustado, arquivada_em')
+      .is('arquivada_em', null));
+  } catch (err) {
+    console.warn('[avaliacao-diretores] Ajustes manuais indisponíveis, usando apenas o dado importado:', err?.message || String(err));
+    ajustes = [];
+  }
+
+  // Ajustes manuais de pontuações/indicadores (camada adicional sobre o
+  // valor importado do EAV). Mesma tolerância: sem a tabela o dashboard
+  // continua apenas com o dado importado.
+  let ajustesIndicadores = [];
+  try {
+    ajustesIndicadores = await fetchAll(() => supabase
+      .from(AJI)
+      .select('id, avaliacao_id, registro_id, chave, valor_original, valor_manual, origem, arquivada_em, created_at, updated_at')
+      .is('arquivada_em', null));
+  } catch (err) {
+    console.warn('[avaliacao-diretores] Ajustes de indicadores indisponíveis, usando apenas o dado importado:', err?.message || String(err));
+    ajustesIndicadores = [];
+  }
+
+  return { avaliacoes, registros, periodos, indicadores, ajustes, ajustesIndicadores };
 }
 
 export function avaliacaoLabel(a){
@@ -309,7 +340,7 @@ function statusPeriodo(v){
   return s && !eNaoInformado(s) ? s : null;
 }
 /** Janela de anos plausível a partir das avaliações (corta anos inventados). */
-function janelaDeAnos(avaliacoes){
+export function janelaDeAnos(avaliacoes){
   const anos = (avaliacoes || []).map(a => Number(a?.ano)).filter(y => Number.isFinite(y));
   if(!anos.length) return { janela: [2000, new Date().getFullYear() + 2], base: null };
   const min = Math.min(...anos), max = Math.max(...anos);
@@ -430,23 +461,51 @@ export function buildMonthlyLabelMap(registros, avaliacoes){
 export function buildDirectorMonthlyEvolution(registros, avaliacoes, nomeDiretor){
   const { labelMap, columns } = buildMonthlyLabelMap(registros, avaliacoes);
   if(!columns.length) return null;
+  // Ordem cronológica das avaliações: usada para escolher o registro dono do
+  // ponto exibido quando o mesmo mês aparece em mais de uma avaliação.
+  const ordemAvaliacao = new Map((avaliacoes || []).map((a, i) => [a.id, i]));
   const porRegistro = (registros || []).map(r => {
     const m = new Map();
     for(const p of r.periodos || []){
       const info = labelMap.get(`${r.avaliacaoId}|${p.rotulo}`);
-      if(info && !m.has(info.label)) m.set(info.label, p);
+      if(info && !m.has(info.label)) m.set(info.label, { p, r });
     }
     return m;
   });
   const dados = columns.map(col => {
-    const ps = porRegistro.map(m => m.get(col.label)).filter(Boolean);
+    // ORIGEM E PRIORIDADE do ponto exibido (vigência): ajuste manual (2) >
+    // cadastro manual (1) > valor importado (0); empate cai para a avaliação
+    // mais recente. Uma planilha futura, portanto, não sobrescreve valores
+    // manuais — nem no gráfico, nem no resumo, nem no período editável.
+    const prioridadeDe = x => (x.p?.ajustado ? 2 : 0) + (x.p?.origem === 'cadastro_manual' ? 1 : 0);
+    const donos = porRegistro.map(m => m.get(col.label)).filter(Boolean).sort((a, b) =>
+      (prioridadeDe(b) - prioridadeDe(a)) ||
+      ((ordemAvaliacao.get(b.r?.avaliacaoId) ?? -1) - (ordemAvaliacao.get(a.r?.avaliacaoId) ?? -1)));
+    // Só os donos de MAIOR prioridade alimentam o ponto: um valor manual
+    // (ajuste ou cadastro) nunca é diluído nem substituído pelo importado.
+    const pesos = donos.map(prioridadeDe);
+    const maximo = pesos.length ? Math.max(...pesos) : 0;
+    const ps = donos.filter((x, i) => pesos[i] === maximo).map(x => x.p);
     const niveis = ps.map(p => romanLevel(p.nivel)).filter(v => v != null);
     const valor = avgNumbers(niveis);
     const nivelRoman = valor != null && Number.isInteger(valor) ? valor : (niveis[0] ?? null);
     const status = ps.map(p => statusPeriodo(p.estagio)).find(Boolean)
       ?? ps.map(p => normName(p.estagio)).find(Boolean) ?? null;
+    const rotulo = ps.map(p => normName(p.rotulo)).find(Boolean) ?? null;
     const valido = ps.some(p => statusPeriodo(p.estagio) != null || romanLevel(p.nivel) != null);
-    return { col, valor, nivelRoman, status, valido };
+    // Registro/período donos do ponto exibido (prioridade de vigência, depois
+    // avaliação mais recente) — permitem editar e auditar o valor vigente
+    // daquele mês.
+    const dono = donos[0] || null;
+    return {
+      col, valor, nivelRoman, status, rotulo, valido,
+      periodoId: dono?.p?.id ?? null,
+      registroId: dono?.r?.id ?? null,
+      avaliacaoId: dono?.r?.avaliacaoId ?? null,
+      statusOriginal: dono?.p?.estagioOriginal ?? null,
+      nivelOriginal: dono?.p?.nivelOriginal ?? null,
+      ajustado: !!dono?.p?.ajustado
+    };
   });
   const inicio = dados.findIndex(d => d.valido);
   if(inicio < 0) return null;
@@ -454,10 +513,21 @@ export function buildDirectorMonthlyEvolution(registros, avaliacoes, nomeDiretor
   return {
     periods: trecho.map(d => ({
       label: d.col.label,
+      // Rótulo ORIGINAL do período na planilha (ex.: "AGO DE 2026"), usado no
+      // resumo do último período válido exibido no canto do gráfico.
+      rotulo: d.rotulo,
       isQuarter: d.col.isQuarter,
       quarterLabel: d.col.quarterLabel,
       status: d.status,
-      nivelRoman: d.nivelRoman
+      nivelRoman: d.nivelRoman,
+      // Identificadores reais + valor original importado: sustentam a edição
+      // do último período válido e o tooltip com o dado da planilha.
+      periodoId: d.periodoId,
+      registroId: d.registroId,
+      avaliacaoId: d.avaliacaoId,
+      statusOriginal: d.statusOriginal,
+      nivelOriginal: d.nivelOriginal,
+      ajustado: d.ajustado
     })),
     series: [{
       key: 'diretor',
@@ -569,6 +639,120 @@ export function buildPeriodLabelMap(registros, avaliacoes){
   return map;
 }
 
+// ---------------------------------------------------------------------------
+// AJUSTES MANUAIS DE PONTUAÇÕES/INDICADORES — regra centralizada de vigência
+// ---------------------------------------------------------------------------
+// Regra, POR REGISTRO e POR CHAVE (nunca duplicada em componentes):
+//   1) ajuste manual ATIVO do PRÓPRIO registro vence;
+//   2) senão, o ajuste manual ATIVO mais recente do MESMO diretor cuja
+//      avaliação seja ANTERIOR à deste registro (propagação para planilhas
+//      futuras: a planilha futura nunca sobrescreve o valor manual, e o
+//      histórico anterior nunca é reescrito por um ajuste feito depois);
+//   3) sem ajuste -> valor importado.
+// Percentuais vêm como FRAÇÃO (0.1 = 10%) — mesma unidade gravada no EAV e
+// exibida por formatMetricCell.
+
+function contextoDeAjustesIndicadores(registros, avaliacoes, ajustes){
+  // Aceita tanto as linhas cruas (avaliacao_id) quanto os registros do modelo
+  // (avaliacaoId): o contexto é normalizado para o formato do modelo.
+  const registrosById = new Map();
+  for(const r of registros || []){
+    if(!r || !r.id) continue;
+    registrosById.set(r.id, {
+      id: r.id,
+      diretor: r.diretor,
+      avaliacaoId: r.avaliacaoId ?? r.avaliacao_id ?? null
+    });
+  }
+  const ordemAval = new Map((avaliacoes || []).map((a, i) => [a.id, i]));
+  const porChave = new Map();
+  for(const a of ajustes || []){
+    if(!a || a.arquivada_em || !a.chave) continue;
+    (porChave.get(a.chave) || porChave.set(a.chave, []).get(a.chave)).push(a);
+  }
+  return { registrosById, ordemAval, porChave };
+}
+
+function melhorAjusteIndicador(chave, record, ctx){
+  const candidatos = ctx.porChave.get(chave);
+  if(!candidatos || !candidatos.length) return null;
+  const diretorKey = nameKey(record.diretor);
+  const ordem = ctx.ordemAval.get(record.avaliacaoId) ?? -1;
+  let melhor = null;
+  let melhorRank = null;
+  for(const a of candidatos){
+    const dono = ctx.registrosById.get(a.registro_id);
+    if(!dono) continue;
+    const proprio = dono.id === record.id;
+    if(!proprio && nameKey(dono.diretor) !== diretorKey) continue;
+    const ordemAjuste = ctx.ordemAval.get(dono.avaliacaoId) ?? -1;
+    if(!proprio && ordemAjuste >= ordem) continue;
+    const rank = [proprio ? 1 : 0, ordemAjuste, String(a.created_at || '')];
+    if(!melhorRank
+      || rank[0] > melhorRank[0]
+      || (rank[0] === melhorRank[0] && rank[1] > melhorRank[1])
+      || (rank[0] === melhorRank[0] && rank[1] === melhorRank[1] && rank[2] > melhorRank[2])){
+      melhor = a;
+      melhorRank = rank;
+    }
+  }
+  return melhor;
+}
+
+/**
+ * Métricas VIGENTES de um registro: base importada (EAV → nome amigável)
+ * sobreposta pelos ajustes manuais ativos. Devolve também `metricasImportado`
+ * (base auditável, nunca alterada) e `metricasInfo` (origem/data por chave),
+ * que alimentam o painel "Atualizar dados".
+ */
+function metricasDoRegistro(record, ctx){
+  const importado = {};
+  for(const ind of record.indicadores || []){
+    const nome = friendlyMetricName(ind.nome);
+    if(nome && importado[nome] === undefined) importado[nome] = ind.valorNumerico ?? null;
+  }
+  const metricas = { ...importado };
+  const metricasInfo = {};
+  const chaves = new Set([...Object.keys(importado), ...ctx.porChave.keys()]);
+  for(const chave of chaves){
+    const ajuste = melhorAjusteIndicador(chave, record, ctx);
+    if(ajuste){
+      metricas[chave] = ajuste.valor_manual == null ? null : Number(ajuste.valor_manual);
+      metricasInfo[chave] = {
+        origem: ajuste.origem === 'cadastro_manual' ? 'cadastro_manual' : 'edicao_manual',
+        ajustado: true,
+        atualizadoEm: ajuste.updated_at || ajuste.created_at || null
+      };
+    } else {
+      metricasInfo[chave] = { origem: 'planilha', ajustado: false, atualizadoEm: null };
+    }
+  }
+  return { metricas, metricasImportado: importado, metricasInfo };
+}
+
+/**
+ * Reaplica (em memória) ajustes de pontuação JÁ CONFIRMADOS pelo banco sobre
+ * o modelo montado: cards, radar e matriz atualizam na hora, sem F5. A base
+ * importada (`metricasImportado`) permanece intacta; somente a cópia vigente
+ * é recalculada pela mesma regra usada em buildDashboardModel.
+ */
+export function aplicarAjusteIndicadorNoModelo(model, ajustes){
+  if(!model || !ajustes || !ajustes.length) return model;
+  const mapa = new Map((model.ajustesIndicadores || []).map(a => [a.id, a]));
+  for(const a of ajustes){
+    if(!a || !a.id) continue;
+    if(a.arquivada_em) mapa.delete(a.id);
+    else mapa.set(a.id, a);
+  }
+  const ajustesIndicadores = [...mapa.values()];
+  const ctx = contextoDeAjustesIndicadores(model.registros, model.avaliacoes, ajustesIndicadores);
+  const registros = (model.registros || []).map(r => {
+    const { metricas, metricasImportado, metricasInfo } = metricasDoRegistro(r, ctx);
+    return { ...r, metricas, metricasImportado, metricasInfo };
+  });
+  return { ...model, registros, ajustesIndicadores };
+}
+
 /**
  * Transforma o resultado cru do Supabase no modelo usado pelos dashboards.
  * Cada avaliação é uma fotografia independente: registros carregam
@@ -578,15 +762,32 @@ export function buildDashboardModel(raw){
   const avaliacoesOrdenadas = [...(raw.avaliacoes || [])].sort((a, b) =>
     (a.ano - b.ano) || (a.trimestre - b.trimestre) || String(a.importado_em).localeCompare(String(b.importado_em)));
 
+  // REGRA CENTRALIZADA DO VALOR VIGENTE: se existir ajuste manual ativo para
+  // o período, Status/Nível vigentes são os ajustados; caso contrário, os
+  // importados. O original importado fica preservado em estagioOriginal/
+  // nivelOriginal (auditoria) e NUNCA é gravado de volta no banco.
+  const ajustesPorPeriodo = new Map();
+  for(const a of raw.ajustes || []){
+    if(a?.periodo_id && !a.arquivada_em) ajustesPorPeriodo.set(a.periodo_id, a);
+  }
+
   const periodosPorRegistro = new Map();
   for(const p of raw.periodos || []){
+    const vig = valorVigente(p, ajustesPorPeriodo.get(p.id));
     (periodosPorRegistro.get(p.registro_id) || periodosPorRegistro.set(p.registro_id, []).get(p.registro_id)).push({
       id: p.id,
       rotulo: p.rotulo_periodo,
       ordem: p.ordem,
-      estagio: p.estagio,
-      nivel: p.nivel,
-      nivelRoman: romanLevel(p.nivel)
+      estagio: vig.status,
+      // Ajuste ativo com decisão manual "Não informado": vigente fica
+      // "Não informado" (texto) / roman null — NUNCA volta ao p.nivel
+      // importado; o original permanece em estagioOriginal/nivelOriginal.
+      nivel: vig.ajustado ? (vig.nivel != null ? nivelExibicao(vig.nivel) : 'Não informado') : p.nivel,
+      nivelRoman: vig.nivel,
+      estagioOriginal: vig.statusOriginal,
+      nivelOriginal: vig.nivelOriginal,
+      ajustado: vig.ajustado,
+      origem: p.origem === 'cadastro_manual' ? 'cadastro_manual' : 'planilha'
     });
   }
   const indicadoresPorRegistro = new Map();
@@ -602,14 +803,18 @@ export function buildDashboardModel(raw){
 
   const labelPorId = new Map(avaliacoesOrdenadas.map(a => [a.id, avaliacaoLabel(a)]));
 
+  // Ajustes manuais de pontuações/indicadores: mesma regra centralizada
+  // aplicada a todos os registros na montagem do modelo.
+  const ajustesIndicadores = (raw.ajustesIndicadores || []).filter(a => a && !a.arquivada_em);
+  const ctxIndicadores = contextoDeAjustesIndicadores(raw.registros, avaliacoesOrdenadas, ajustesIndicadores);
+
   const registros = (raw.registros || []).map(r => {
     const indicadores = (indicadoresPorRegistro.get(r.id) || []).slice()
       .sort((x, y) => (x.ordem ?? 0) - (y.ordem ?? 0));
-    const metricas = {};
-    for(const ind of indicadores){
-      const nome = friendlyMetricName(ind.nome);
-      if(nome && metricas[nome] === undefined) metricas[nome] = ind.valorNumerico;
-    }
+    const { metricas, metricasImportado, metricasInfo } = metricasDoRegistro(
+      { id: r.id, avaliacaoId: r.avaliacao_id, diretor: r.diretor, indicadores },
+      ctxIndicadores
+    );
     return {
       id: r.id,
       avaliacaoId: r.avaliacao_id,
@@ -623,6 +828,8 @@ export function buildDashboardModel(raw){
       nivelAtual: r.nivel_atual,
       nivelRoman: romanLevel(r.nivel_atual),
       metricas,
+      metricasImportado,
+      metricasInfo,
       indicadores,
       periodos: (periodosPorRegistro.get(r.id) || []).slice().sort((x, y) => (x.ordem ?? 0) - (y.ordem ?? 0))
     };
@@ -651,7 +858,7 @@ export function buildDashboardModel(raw){
     };
   });
 
-  return { avaliacoes, registros };
+  return { avaliacoes, registros, ajustesIndicadores };
 }
 
 // ---------------------------------------------------------------------------
@@ -682,24 +889,57 @@ export function formatMetricCell(v, key){
 }
 
 /**
- * Colunas de histórico da matriz, em ordem (avaliação, ordem da coluna).
- * Cada período vira DUAS colunas (Status/estágio + Nível) no componente.
- * Rótulos repetidos entre avaliações são compostos (buildPeriodLabelMap).
+ * Colunas de histórico da matriz, em ordem CRONOLÓGICA (ano, mês) — a mesma
+ * ordem da planilha e a ordem gerada pelo cadastro manual de períodos. Cada
+ * período vira DUAS colunas (Status/estágio + Nível) no componente. Rótulos
+ * repetidos entre avaliações são compostos (buildPeriodLabelMap); a leitura do
+ * mês/ano usa sempre o rótulo BRUTO da planilha. Colunas sem mês/ano
+ * reconhecível mantêm a posição original.
  */
 export function matrixPeriodColumns(registros, avaliacoes){
   const labelMap = buildPeriodLabelMap(registros || [], avaliacoes || []);
   const regs = registros || [];
   const cols = [];
+  const rotuloBruto = new Map();
   const vistas = new Set();
   for(const a of avaliacoes || []){
     for(const r of regs.filter(x => x.avaliacaoId === a.id)){
       for(const p of r.periodos || []){
         const lab = labelMap.get(`${r.avaliacaoId}|${p.rotulo}`);
-        if(lab && !vistas.has(lab)){ vistas.add(lab); cols.push(lab); }
+        if(lab && !vistas.has(lab)){
+          vistas.add(lab);
+          cols.push(lab);
+          rotuloBruto.set(lab, p.rotulo);
+        }
       }
     }
   }
-  return cols;
+  return ordenarColunasCronicamente(cols, rotuloBruto, avaliacoes || []);
+}
+
+function ordenarColunasCronicamente(cols, rotuloBruto, avaliacoes){
+  const { janela } = janelaDeAnos(avaliacoes);
+  let anoCorrente = null;
+  const candidatos = cols.map(lab => {
+    const h = parseMonthHeader(rotuloBruto.get(lab) ?? lab, janela);
+    if(!h.isMonth || !h.month) return null;
+    const ano = h.year ?? anoCorrente;
+    if(ano == null) return null;
+    anoCorrente = ano;
+    return { lab, ano, mes: h.month };
+  });
+  const posicoes = [];
+  const ordenaveis = [];
+  candidatos.forEach((c, i) => {
+    if(!c) return;
+    posicoes.push(i);
+    ordenaveis.push(c);
+  });
+  if(!posicoes.length) return cols;
+  ordenaveis.sort((a, b) => (a.ano - b.ano) || (a.mes - b.mes));
+  const out = cols.slice();
+  posicoes.forEach((pos, i) => { out[pos] = ordenaveis[i].lab; });
+  return out;
 }
 
 /**

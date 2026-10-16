@@ -94,11 +94,18 @@ export function MonthlyEvolutionChart({periods,series}){
    triQuebra[i]=corte>0?[texto.slice(0,corte),texto.slice(corte+1)]:[texto];
  });
  const linhas=(p,v)=>{
-   const out=[periodoExtenso(p.label)];
-   if(p.status)out.push(`Estágio: ${p.status}`);
-   out.push(`Nível de desenvolvimento: ${ROMANO[v]||fmtNivel(v)}`);
-   if(p.quarterLabel)out.push(`Fechamento do ${p.quarterLabel}`);
-   return out;
+  const out=[periodoExtenso(p.label)];
+  if(p.status)out.push(`Estágio: ${p.status}`);
+  out.push(`Nível de desenvolvimento: ${ROMANO[v]||fmtNivel(v)}`);
+  // Ajuste manual: o valor VIGENTE acima difere do importado da planilha —
+  // o original aparece para consulta/auditoria (sem justificativa).
+  if(p.ajustado){
+   const difEstagio=(p.statusOriginal||'')!==(p.status||'');
+   const difNivel=p.nivelOriginal!=null&&p.nivelOriginal!==v;
+   if(difEstagio||difNivel)out.push(`Original da planilha: ${p.statusOriginal||'—'} · Nível ${ROMANO[p.nivelOriginal]||'—'}`);
+  }
+  if(p.quarterLabel)out.push(`Fechamento do ${p.quarterLabel}`);
+  return out;
  };
  const abre=(e,l)=>setTip({x:e.clientX,y:e.clientY,l});
  const mexe=e=>setTip(t=>t?{...t,x:e.clientX,y:e.clientY}:t);

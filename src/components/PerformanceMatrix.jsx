@@ -16,7 +16,7 @@ function uniqueSorted(list){
   return [...new Set(list.filter(v => !isEmpty(v)))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
 }
 
-export default function PerformanceMatrix({ records, allRecords, avaliacoes }){
+export default function PerformanceMatrix({ records, allRecords, avaliacoes, podeAtualizarDados, onAtualizarDados }){
   const regs = records || [];
   const labelMap = useMemo(() => buildPeriodLabelMap(regs, avaliacoes || []), [regs, avaliacoes]);
   const periodCols = useMemo(() => matrixPeriodColumns(regs, avaliacoes || []), [regs, avaliacoes]);
@@ -136,6 +136,7 @@ export default function PerformanceMatrix({ records, allRecords, avaliacoes }){
       <div className="mx-bar">
         <button className="mx-btn" type="button" onClick={() => setFiltersOpen(o => !o)} aria-expanded={filtersOpen}>{filtersLabel}</button>
         <span className="mx-count">{rows.length} de {regs.length} registro(s)</span>
+        <button className="mx-btn" type="button" onClick={onAtualizarDados} disabled={!podeAtualizarDados} title={podeAtualizarDados ? 'Cadastrar ou editar períodos, pontuações e indicadores deste diretor' : 'Selecione um diretor específico na lateral para atualizar os dados.'}>Atualizar dados</button>
         <button className="mx-btn" type="button" onClick={toggleHistory} disabled={!periodCols.length}>{showHistory ? 'Ocultar histórico' : 'Ver histórico completo'}</button>
       </div>
       {filtersOpen && (

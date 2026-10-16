@@ -45,12 +45,15 @@ export function resolveObservacaoVinculo(registros, avaliacoes, { regional, dire
 
 /**
  * Filtros da consulta (prioridade): registro_id → avaliacao_id → escopo
- * 'diretor' → não arquivadas; regional e diretor confirmam a seleção atual.
+ * 'diretor' → não arquivadas → SEM tipo (pareceres ficam fora da lista de
+ * observações: `tipo` só é preenchido por Parecer do Regional/Operações);
+ * regional e diretor confirmam a seleção atual.
  * Nunca consulta somente pela regional.
  */
 export function observacaoFiltros({ registroId, avaliacaoId, regional, diretor } = {}){
   const filtros = [
     { col: 'escopo', op: 'eq', valor: ESCOPO_DIRETOR },
+    { col: 'tipo', op: 'is', valor: null },
     { col: 'arquivada_em', op: 'is', valor: null }
   ];
   if(textoDe(diretor)) filtros.push({ col: 'diretor', op: 'eq', valor: textoDe(diretor) });
@@ -62,13 +65,15 @@ export function observacaoFiltros({ registroId, avaliacaoId, regional, diretor }
 
 /**
  * Guarda de exibição: só aparece observação individual (escopo 'diretor'),
- * não arquivada, do MESMO diretor, da mesma regional e da mesma avaliação.
- * Observações de outro diretor, de outra regional, de outra avaliação, de
- * escopo regional/geral ou arquivadas nunca são exibidas.
+ * não arquivada, SEM tipo (pareceres regional/operacoes nunca entram na
+ * lista de observações), do MESMO diretor, da mesma regional e da mesma
+ * avaliação. Observações de outro diretor, de outra regional, de outra
+ * avaliação, de escopo regional/geral ou arquivadas nunca são exibidas.
  */
 export function observacaoVisivel(obs, { registroId, avaliacaoId, regional, diretor } = {}){
   if(!obs || obs.arquivada_em) return false;
   if(obs.escopo !== ESCOPO_DIRETOR) return false;
+  if(obs.tipo != null) return false;
   if(!textoDe(diretor) || nameKey(obs.diretor) !== nameKey(diretor)) return false;
   if(textoDe(regional) && nameKey(obs.regional) !== nameKey(regional)) return false;
   if(registroId && obs.registro_id && obs.registro_id !== registroId) return false;

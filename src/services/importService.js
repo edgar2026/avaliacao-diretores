@@ -9,13 +9,19 @@ export const STAGES = {
   VALIDANDO: 'validando',
   ENVIANDO: 'enviando',
   SALVANDO: 'salvando',
+  ATUALIZANDO_PERIODOS: 'atualizando_periodos',
+  ATUALIZANDO_INDICADORES: 'atualizando_indicadores',
+  ATUALIZANDO_CADASTROS: 'atualizando_cadastros',
   CONCLUIDO: 'concluido'
 };
 
 export const STAGE_LABELS = {
   [STAGES.VALIDANDO]: 'Validando',
-  [STAGES.ENVIANDO]: 'Enviando arquivo',
+  [STAGES.ENVIANDO]: 'Salvando arquivo',
   [STAGES.SALVANDO]: 'Salvando dados',
+  [STAGES.ATUALIZANDO_PERIODOS]: 'Atualizando períodos',
+  [STAGES.ATUALIZANDO_INDICADORES]: 'Atualizando indicadores',
+  [STAGES.ATUALIZANDO_CADASTROS]: 'Atualizando cadastros',
   [STAGES.CONCLUIDO]: 'Concluído'
 };
 
@@ -158,9 +164,16 @@ export async function runImport({ file, data, analysis, meta, onProgress }){
     const periodosRows = buildPeriodosRows(registrosRows, analysis);
     const indicadoresRows = buildIndicadoresRows(registrosRows);
 
+    // Acompanhamento para a interface (não altera o que nem a ordem gravada):
+    // registros e períodos primeiro, depois os indicadores.
+    setStage(STAGES.ATUALIZANDO_PERIODOS);
     await insertRegistros(registrosRows.map(({ _record, ...row }) => row));
     await insertPeriodos(periodosRows);
+    setStage(STAGES.ATUALIZANDO_INDICADORES);
     await insertIndicadores(indicadoresRows);
+    // Acompanhamento para a interface (publicação = cadastros novos passam a
+    // aparecer nos filtros): nenhum dado extra é gravado neste estágio.
+    setStage(STAGES.ATUALIZANDO_CADASTROS);
     await publishAvaliacao(avaliacaoId, {
       totalRegistros: analysis.records.length,
       totalColunas: analysis.columnCount

@@ -125,12 +125,12 @@ Os dashboards **não usam mais dados locais**: `src/data/initialRows.json` foi r
 - **Filtros em cascata (sem “Nível de análise”)**: a lateral tem apenas **Regional** e **Diretor**. Estados: todas + todos = consolidado geral · regional + todos = consolidado regional · regional + diretor = perfil individual. Trocar a regional limpa o diretor; o diretor fica desabilitado sem regional; “Todos os diretores” nunca conta como diretor. **Sem filtro de unidade** (unidade aparece em tabelas/detalhes). Títulos automáticos: “Desempenho geral” / “Desempenho da regional” / “Perfil do diretor”.
 - **Contagens de quantidade**: KPIs, resumo lateral e cartões por avaliação usam a função única `countDistinctNames` (`dashboardService.js`) — descarta nulos, vazios e marcadores técnicos ("Diretor não informado", "Unidade não informada"), ignora espaços extras e maiúsculas; **nunca** conta nº de registros. Com a planilha real: **60 diretores** e **60 unidades** (61 registros − 1 marcador).
 - **Comparações**: por avaliação (título · Ttri/ano · nome real do arquivo · diretores · unidades · nível médio); seleção vs consolidado geral (radar); e **“Evolução mensal do nível de desenvolvimento”** — **uma única série** (o diretor selecionado; sem consolidado regional nem consolidado geral), eixo X **mensal, pelos cabeçalhos REAIS da planilha** reconhecidos por `parseMonthHeader`/`buildMonthlyLabelMap`/`buildDirectorMonthlyEvolution` (`dashboardService.js`): nome de mês (`JULHO`), data (`JAN DE 2026`, `01/01/2026`) e fechamento de trimestre (`2TRI/25`, `SET/3TRI`, `MAR/1TRI 2026`) viram `MES/AAAA` — com a planilha atual exibe exatamente 16 meses (`JUN/2025` … `SET/2026`), nunca além de SET/2026 e **sem nenhum rótulo `/85` ou data inventada** (ano ausente é inferido na ordem cronológica; ano fora da janela das avaliações é descartado; ano nunca é lido de notas, percentuais ou valores de células). O gráfico **começa no primeiro mês com status ou nível válido daquele diretor** (meses anteriores ficam ocultos) e segue até o último período real da avaliação; lacuna posterior mantém o mês no eixo **sem ponto, sem zero e sem repetição do valor** (linha interrompida). Fechamentos trimestrais usam **marcador dourado maior com contorno**, rótulo “Nº trimestre de AAAA” abaixo do mês e um único ponto. Conversão de níveis via `romanLevel` com **correspondência exata** (mapa I–V, sem reconhecimento parcial de IV como I ou V); **largura responsiva** — `ResizeObserver` mede o container e o gap entre pontos é recalculado dinamicamente para ocupar toda a largura do card (sem rolagem horizontal em resoluções ≥ ~700 px); algarismo romano fixo acima de cada ponto, ausência = quebra na linha (nunca 0) e tooltip com mês/ano por extenso, estágio, nível de desenvolvimento em romano e fechamento de trimestre (§16).
-- **Layout**: **uma única rolagem vertical** da página; lateral simplificada (marca, atualização pela planilha, Regional, Diretor, resumo da seleção, observação e salvar); blocos empilhados em largura total, nesta ordem: **Histórico das avaliações → Evolução mensal do nível de desenvolvimento (somente com diretor selecionado) → Comparação de desempenho → Indicadores → Matriz histórica de desempenho**; card de evolução com ~420–430px no desktop e ~400–410px no notebook (altura responsiva no celular), radar mantido em ~430px no desktop (~380px no mobile); radar ampliado e centralizado com legenda abaixo.
+- **Layout**: **uma única rolagem vertical** da página; lateral simplificada (marca, atualização pela planilha, Regional, Diretor, resumo da seleção — **sem o bloco antigo de observações**, ver §17); blocos empilhados em largura total, nesta ordem: **Pareceres (dois cards no topo, somente com diretor selecionado) → Histórico das avaliações → Evolução mensal do nível de desenvolvimento (somente com diretor selecionado) → Comparação de desempenho → Indicadores → Matriz histórica de desempenho**; card de evolução com ~420–430px no desktop e ~400–410px no notebook (altura responsiva no celular), radar mantido em ~430px no desktop (~380px no mobile); radar ampliado e centralizado com legenda abaixo.
 - **Matriz histórica de desempenho** (`src/components/PerformanceMatrix.jsx`): substitui a antiga “Detalhes da seleção” e reproduz a planilha original. Colunas congeladas (Regional · Diretor · Unidade) com rolagem horizontal; **histórico dinâmico** — cada período armazenado vira duas colunas (Status = `periodo.estagio` · Nível = `periodo.nivel`), em ordem (avaliação, `ordem`), rótulo composto quando repetido entre avaliações; **bloco final** separado (Status de gestão = `statusGestao` · Ciclo de vida = `cicloVida` · Nível da unidade = `nivelAtual`) seguido dos 9 indicadores (EAV amigável; ausência = “—”, nunca 0) e de indicadores extras futuros em dinâmico. **8 filtros locais** combinados por AND (Regional, Diretor, Unidade, Período, Status trimestral, Nível, Status de gestão, Ciclo de vida) + “Limpar filtros” + contador “X de Y registros”; o filtro **Período** delimita a casca em que Status trimestral/Nível valem. Helpers puros testáveis em `dashboardService.js` (`matrixPeriodColumns`, `filterMatrixRows`, `formatMetricCell`, `MATRIX_INDICATORS`). Sem mapa de calor nesta etapa.
 - **Estados de tela**: carregando; erro de consulta (com “Tentar novamente”); **vazio informativo** quando não há avaliação publicada; **Error Boundary** (`src/components/ErrorBoundary.jsx`) envolvendo a área principal — um erro de renderização (ex.: gráfico falhando com dados inesperados) mostra um estado de erro recuperável em vez de derrubar o app.
 - **Contrato de métricas**: o modelo do Supabase expõe `metricas` (português); os gráficos leem `r?.metricas?.[n]` com acesso defensivo a `null`/`undefined`.
-- **Textos da interface**: sem nomes técnicos de banco/auth na tela (“Supabase”, “login”, “anon”, “publicadas”, “Planilha1”, nomes de variáveis); erros vindos do parser/serviços são traduzidos na exibição pelo helper `humanError` (em `App.jsx` e `ImportDialog.jsx`). O selo no topo exibe “1 avaliação disponível” / “X avaliações disponíveis”.
-- **Observações (CRUD completo no banco, vinculadas ao diretor)**: salvas em `avaliacoes_diretores_observacoes` via `observacoesService.js`; **localStorage removido**. **Regra definitiva**: a observação é registrada pelo regional, mas **vinculada exclusivamente ao diretor selecionado** dentro da avaliação correspondente — e **somente é exibida quando o mesmo diretor está selecionado** (nunca para outro diretor da mesma regional). O formulário e a lista ("Observação do regional" / "Observações do regional") só existem com **regional + diretor** selecionados: sem regional a mensagem é "Selecione uma regional e um diretor para registrar ou consultar observações."; com regional e sem diretor é "Selecione um diretor para registrar ou consultar observações." (campo desabilitado, **Salvar observação** desabilitado e lista oculta nos dois casos). Criar: valida texto + regional + diretor → localiza o vínculo (avaliação mais recente em que o diretor tem registro + `registro_id`) → insere com `escopo='diretor'`, `avaliacao_id`, `registro_id`, `regional`, `diretor`, `criado_por`/`atualizado_por` `NULL` → aguarda confirmação do banco → limpa campo → "Observação salva com sucesso." → recarrega lista. Listar: prioridade `registro_id` → `avaliacao_id` → `escopo='diretor'` → não arquivadas, com regional e diretor como confirmação; **nunca consulta somente pela regional**; troca de regional/diretor limpa a lista na hora e descarta respostas atrasadas (token de requisição). Cada cartão mostra **diretor, regional, avaliação (ex.: 3º tri/2026), data/horário, texto, Editar e Excluir**; lista ordenada por data decrescente com as 3 mais recentes e "Ver todas". Editar: atualiza só `observacao` + `updated_at` pelo id (**vínculo preservado**) → "Observação atualizada com sucesso.". Excluir: exclusão lógica (`arquivada_em`; `DELETE` físico bloqueado no RLS) → "Observação excluída com sucesso."; arquivadas não aparecem. Persiste após F5 (dados no banco).
+- **Textos da interface**: sem nomes técnicos de banco/auth na tela (“Supabase”, “login”, “anon”, “publicadas”, “Planilha1”, nomes de variáveis); erros vindos do parser/serviços são traduzidos na exibição pelo helper `humanError` (em `App.jsx` e `ImportDialog.jsx`). O selo “1 avaliação disponível” / “X avaliações disponíveis” no topo **foi removido em 2026-10-15** (ver §17).
+- **Observações (CRUD completo no banco, vinculadas ao diretor)**: salvas em `avaliacoes_diretores_observacoes` via `observacoesService.js`; **localStorage removido**. **Regra definitiva**: a observação é registrada pelo regional, mas **vinculada exclusivamente ao diretor selecionado** dentro da avaliação correspondente — e **somente é exibida quando o mesmo diretor está selecionado** (nunca para outro diretor da mesma regional). O formulário e a lista ("Observação do regional" / "Observações do regional") só existem com **regional + diretor** selecionados: sem regional a mensagem é "Selecione uma regional e um diretor para registrar ou consultar observações."; com regional e sem diretor é "Selecione um diretor para registrar ou consultar observações." (campo desabilitado, **Salvar observação** desabilitado e lista oculta nos dois casos). Criar: valida texto + regional + diretor → localiza o vínculo (avaliação mais recente em que o diretor tem registro + `registro_id`) → insere com `escopo='diretor'`, `avaliacao_id`, `registro_id`, `regional`, `diretor`, `criado_por`/`atualizado_por` `NULL` → aguarda confirmação do banco → limpa campo → "Observação salva com sucesso." → recarrega lista. Listar: prioridade `registro_id` → `avaliacao_id` → `escopo='diretor'` → não arquivadas, com regional e diretor como confirmação; **nunca consulta somente pela regional**; troca de regional/diretor limpa a lista na hora e descarta respostas atrasadas (token de requisição). Cada cartão mostra **diretor, regional, avaliação (ex.: 3º tri/2026), data/horário, texto, Editar e Excluir**; lista ordenada por data decrescente com as 3 mais recentes e "Ver todas". Editar: atualiza só `observacao` + `updated_at` pelo id (**vínculo preservado**) → "Observação atualizada com sucesso.". Excluir: exclusão lógica (`arquivada_em`; `DELETE` físico bloqueado no RLS) → "Observação excluída com sucesso."; arquivadas não aparecem. Persiste após F5 (dados no banco). **Atualização (2026-10-15)**: o formulário e a lista deixaram de existir na lateral e foram substituídos pela **área de Pareceres** do topo (§17) — o serviço, o vínculo (`resolveObservacaoVinculo`) e os dados do banco permanecem intactos; linhas legadas com `tipo = NULL` continuam sendo “observações” e não aparecem nos cards de parecer.
 
 ---
 
@@ -291,6 +291,8 @@ Correção da regra de vínculo, salvamento e exibição das observações do re
 
 Títulos **"Observação do regional"** e **"Observações do regional"** mantidos (apenas caixa alta via CSS). A edição altera somente o texto (vínculo intacto); a exclusão é lógica (`arquivada_em`) e o `DELETE` físico continua bloqueado no RLS.
 
+> **Descontinuado em 2026-10-15 (ver §17):** o formulário e a lista deixaram de existir na lateral — a interface acima descreve o comportamento vigente até essa data. O serviço (`observacoesService.js`) permanece e é reaproveitado pela área de pareceres.
+
 ### 14.5 Arquivos alterados
 
 | Arquivo | Mudança |
@@ -446,3 +448,167 @@ Card oculto em “Todos os diretores”; visível só com diretor específico; u
 - `npm run build` ✅ (Vite/rolldown: `dist/` gerada; apenas o aviso já existente de chunk >500kB).
 - Smoke de render (script temporário, removido após a checagem): eixo com “Nível I…V” e sem números arábicos; pontos com `I/II/III/IV/V` e sem “Nota”; marcadores `dot-quarter`/`dot-sel` e `dot-hit`; meses `MES/AAAA` e “1º trimestre de 2026”.
 - **Não executado neste passo:** commit, push, atualização do GitHub, deploy/redeploy na Vercel, mudança de variáveis de ambiente.
+
+---
+
+## 17. Área de Pareceres do diretor e remoção do bloco antigo de observações (2026-10-15)
+
+Nova área no topo da tela com os **dois pareceres do diretor** — **Parecer do Regional** e **Parecer de Operações** — exibidos **juntos, lado a lado e sem clique**, acima dos cards/indicadores. Em paralelo, o **selo “1 avaliação disponível”** e o **bloco de observações da lateral** foram removidos. **Nenhum dado do banco foi apagado**: a tabela `avaliacoes_diretores_observacoes` foi apenas estendida com a coluna `tipo`.
+
+### 17.1 O que mudou na interface
+
+| Antes | Depois (2026-10-15) |
+|---|---|
+| Selo “1 avaliação disponível” / “X avaliações disponíveis” no cabeçalho | **Removido** — o cabeçalho fica só com o bloco de identificação (sem espaço vazio) |
+| Lateral: “Observação do regional” + textarea + dicas + **Salvar observação** + “Observações do regional” + lista + “Nenhuma observação registrada.” | **Removido** — a lateral termina no resumo do diretor e ganha `height:auto` (com `max-height` na viewport para a rolagem) |
+| — | **Área “Pareceres do diretor”** no topo da área principal, antes dos cards/indicadores: dois `article` (Regional · Operações) lado a lado no desktop e empilhados (≤ 900px) no celular |
+
+A função do formulário e da lista migrou para os cards de parecer (criar/editar/excluir/histórico). O feedback de upload/importação da lateral (`message`) foi mantido.
+
+### 17.2 Regras de funcionamento
+
+| Regra | Comportamento |
+|---|---|
+| Exibição | Só com **regional + diretor** selecionados; os dois pareceres carregam **automaticamente** (duas consultas em paralelo, sem clique). Sem diretor: apenas a mensagem discreta “Selecione um diretor para consultar os pareceres.” (nenhum card vazio) |
+| Mais recente | Um diretor pode ter **vários** pareceres de cada tipo: o card mostra somente o **mais recente** (`created_at` desc, com o selo “mais recente”); os anteriores saem da tela mas **nunca são substituídos** |
+| Novo parecer | Cria **mais um registro** (o anterior permanece no histórico e este passa a ser o exibido) |
+| Editar | Altera **somente o texto** + `updated_at`; diretor, regional, tipo e avaliação **permanecem** (o cabeçalho do modal mostra o vínculo) |
+| Excluir | **Exclusão lógica** (`arquivada_em`) com confirmação em modal de perigo; ao excluir o mais recente, o **anterior volta automaticamente**. `DELETE` físico continua bloqueado no RLS (sem política de DELETE) |
+| Histórico | Modal **por tipo**, do mais recente para o mais antigo, **incluindo os excluídos** (com o rótulo “Excluído em …”) |
+| Texto longo | No máximo **6 linhas** visíveis; se o texto ultrapassar aparece “Ver parecer completo” (e “Mostrar menos” para recolher). **Nada é cortado em definitivo** — o texto completo fica no banco e no histórico |
+| Isolamento | Um parecer **nunca aparece para outro diretor**: filtro da consulta (`regional` + `diretor`) **e** checagem no cliente (`parecerVisivel`/`parecerPertence`), incluindo a conferência do `registro_id` quando o registro existe |
+| Troca de seleção | Trocar regional/diretor limpa os pareceres anteriores **na hora** e um token descarta respostas atrasadas (a resposta de um diretor anterior nunca sobrescreve a tela) |
+| Persistência | Dados no banco — os pareceres **permanecem após F5** |
+
+Textos da interface: “Parecer do Regional” · “Parecer de Operações” · “mais recente” · “Avaliação: 3º tri/2026” · “Criado em 15/10/2026, 13:29” · “Atualizado em …” · “Carregando pareceres…” · “Nenhum parecer registrado.” · “Adicionar parecer” · “Novo parecer” · “Editar” · “Excluir” · “Histórico (2)” · “Ver parecer completo” · “Mostrar menos” · “Excluir parecer”.
+
+### 17.3 Banco de dados
+
+- **Migration aplicada** (`supabase/migrations/20261015100000_avaliacoes_diretores_observacoes_tipo_parecer.sql`): `alter table avaliacoes_diretores_observacoes add column if not exists tipo text` + `check (tipo in ('regional','operacoes'))` + índice `idx_avaliacoes_diretores_observacoes_tipo`. **`tipo = NULL`** identifica as observações comuns legadas (que **não** aparecem nos cards de parecer).
+- **Tabela reaproveitada**: `avaliacoes_diretores_observacoes` (`escopo='diretor'`, `avaliacao_id`, `registro_id`, `regional`, `diretor`, `observacao`, `created_at`, `updated_at`, `arquivada_em`). `criado_por`/`atualizado_por` seguem `NULL` (sem autenticação nesta fase).
+- **Vínculo ao criar**: mesma lógica das observações (`resolveObservacaoVinculo` = avaliação mais recente em que o diretor tem registro + `registro_id`).
+- **Consulta sem trava de avaliação**: os pareceres são filtrados por `tipo + regional + diretor` (não por `avaliacao_id`), para que um parecer antigo continue visível mesmo após uma nova importação/publicação. A conferência de dono é feita no cliente quando o `registro_id` existe.
+- **Grants `anon` conferidos**: `SELECT`/`INSERT` em todas as colunas e `UPDATE` apenas em `(observacao, arquivada_em, updated_at)` — suficiente para criar, editar e excluir (logicamente) pareceres.
+
+### 17.4 Arquivos alterados
+
+| Arquivo | Mudança |
+|---|---|
+| `supabase/migrations/20261015100000_avaliacoes_diretores_observacoes_tipo_parecer.sql` | **novo** — coluna `tipo` + constraint + índice (aplicada no banco) |
+| `src/services/pareceresService.js` | **novo** — `TIPOS_PARECER`, `TIPO_LABEL`, `ehTipoParecer`, `validarParecer`, `parecerFiltros`, `parecerPertence`, `parecerVisivel`, `parecerMaisRecente`, `parecerEditado`, `listPareceres`, `createParecer`, `updateParecer`, `archiveParecer` |
+| `src/services/observacoesService.js` | `observacaoFiltros`/`observacaoVisivel` passam a **ignorar linhas com `tipo` preenchido** (pareceres nunca aparecem na lista antiga de observações) |
+| `src/components/Pareceres.jsx` | **novo** — os dois cards, carregamento automático, editor (novo/editar), histórico por tipo, exclusão com `ConfirmModal` e clamp de 6 linhas |
+| `src/App.jsx` | import/render de `<Pareceres/>` antes dos indicadores; remoção do selo, do bloco de observações da lateral, dos estados/funções associados e do `ConfirmModal` do app |
+| `src/styles.css` | remoção das regras `.badge` e das regras mortas `.obs-*`; novos estilos `.parecer-*`/`.hist-*` (inclui `@media(max-width:900px)` para empilhar os cards); `.sidebar` com `height:auto` + `max-height` |
+| `tests/unit/pareceres.test.mjs` | **novo** — regras puras (tipos, validação, filtros, visibilidade/pertencimento, mais recente, edição) |
+
+### 17.5 Validações
+
+- `npm test` ✅ **75/75** (74 anteriores + 1 novo de `parecerPertence`: o histórico mantém o arquivado, o card não).
+- `npm run build` ✅ (Vite/rolldown: `dist/` gerada; apenas o aviso já existente de chunk >500kB).
+- **Teste real de interface (Chrome headless via CDP, 26/26 verificações)** com **dois diretores reais** (regional AISLANE BELO — Adria Leitão Maia e Ana Tereza Marques), executado contra o build de produção:
+  1. selo removido; 2. cabeçalho sem espaço vazio (1 filho, 84px); lateral sem o bloco antigo e terminando no resumo (404px); 3. carregamento automático dos dois pareceres (sem clique); 4. Regional + Operações juntos, larguras 607+607px, acima dos KPIs; 5. estado vazio correto; 6. novo parecer preserva o anterior (ambos os cards); 7. histórico do mais recente para o mais antigo; texto longo com 6 linhas + “Ver parecer completo”/“Mostrar menos”; 9. edição só do texto + “Atualizado em”; 10. exclusão lógica devolve o anterior; histórico preserva o excluído com “Excluído em”; 8/12. isolamento entre diretores na troca de seleção; 11. persistência após F5; layout celular (390px): cards empilhados, largura total e **sem rolagem horizontal**; **0 erros de console**.
+- Prints da verificação: sem diretor, diretor sem pareceres, diretor com pareceres e celular 390px.
+- **Dados**: os pareceres de teste criados durante a verificação foram **removidos ao final**; as 6 linhas de teste já existentes no banco (teclado, todas arquivadas, 15:57–16:00) permanecem **intocadas**.
+- **Não executado neste passo:** commit, push, atualização do GitHub, deploy/redeploy na Vercel, mudança de variáveis de ambiente.
+
+---
+
+## 18. Prévia da atualização incremental pela planilha (2026-10-16)
+
+Depois que o usuário seleciona uma planilha em “Atualizar pela planilha”, o sistema agora abre uma **prévia completa antes de gravar qualquer dado ou enviar o arquivo ao Storage**. A atualização incremental em si (criação da nova avaliação, gravação de registros/períodos/indicadores, preservação das avaliações anteriores e prioridade dos ajustes manuais) **não foi alterada** — a prévia é uma camada somente-leitura de comparação entre a análise local da planilha e o estado atual do sistema.
+
+### 18.1 Fluxo da prévia
+
+1. **Seleção do arquivo** → validação de extensão (.xlsx/.xls), tamanho (até 15 MB) e aba `Planilha1` (como antes).
+2. **Análise local** da planilha em memória (nada de rede além da consulta de hash) + **hash SHA-256** consultado no banco apenas para reconhecer arquivo já importado.
+3. **Comparação** com o modelo atual (períodos, diretores, unidades, ajustes manuais) montada por `src/services/previewService.js` (`buildUpdatePreview`) — função pura, sem gravação.
+4. **Prévia aberta** com as seções abaixo; os botões são **Cancelar** e **Confirmar atualização**.
+5. **Confirmar atualização** abre um resumo final em modal (períodos novos, campos a completar, ajustes preservados, notas/indicadores, novas Regionais/diretores/unidades e pendências permitidas); só após “Sim, atualizar” roda `runImport` (fluxo aprovado, inalterado).
+6. **Cancelar** fecha a prévia sem enviar arquivo, sem tocar no banco e sem afetar gráficos/indicadores.
+7. Durante o processamento a interface mostra os estágios: *Salvando arquivo → Atualizando períodos → Atualizando indicadores → Atualizando cadastros → Concluído* (o duplo clique é bloqueado pelo estado `busy`).
+
+### 18.2 Informações exibidas na prévia
+
+| Seção | Conteúdo |
+|---|---|
+| Resumo (topo) | nome do arquivo, período mais recente encontrado, total de períodos identificados, registros, **diretores válidos**, unidades e a **referência atual × nova referência** dos indicadores (sem data/hora de análise nem logs técnicos) |
+| **Novos períodos** | cada período que ainda não existe no sistema, com contagem de registros com Status, com Nível e sem preenchimento (“Nenhum período novo encontrado.” quando não houver; nenhum período futuro é inventado) |
+| **Informações que serão completadas** | só períodos **já existentes** cujo campo está **vazio no sistema** e passou a ter valor na planilha (diretor · unidade · período · campo: “Não informado → novo valor”). Status e Nível são tratados separadamente e um campo já preenchido nunca é substituído |
+| **Dados existentes preservados** | períodos que não serão regravados, registros preservados e ajustes manuais intactos (detalhe dos rótulos sob “Ver detalhes”, sem listar célula a célula) |
+| **Ajustes manuais preservados** | frase fixa “Ajustes realizados no sistema têm prioridade e não serão substituídos pela planilha.”; nos detalhes: diretor, período, valor original importado e valor vigente ajustado |
+| **Notas e indicadores** | quantidade de registros com atualização, referência mais recente encontrada e indicadores reconhecidos (Presencial, Acadêmico, Pós-graduação, Nota geral, Ritmo de captação, Crescimento de matrículas, Evasão, Avaliação institucional, EBITDA) — os valores por diretor ficam só em “Ver detalhes” e nunca se misturam com o histórico mensal de Status/Nível |
+| **Novos cadastros e vínculos** | Regionais novas, diretores novos, unidades novas, diretores existentes, mudanças de Regional, mudanças de Unidade e registros sem diretor (nomes novos listados quando a quantidade é pequena; depois da confirmação os filtros são recarregados sem reiniciar o sistema) |
+| **Pendências e alertas** | somente quando necessário: linha sem diretor, período sem Status e Nível, coluna opcional não reconhecida, duplicidade inconsistente, unidade ausente, indicador inválido, Status não reconhecido, Nível fora de I–V, arquivo idêntico, período aparentemente retroativo, conflito com ajuste manual |
+
+### 18.3 Diferenças fundamentais (período novo × campo vazio × preservado)
+
+- **Período novo**: rótulo da planilha cujo mês/ano **não existe** em nenhum período já cadastrado (comparação por mês/ano real, ex.: “SET/3TRI 2026” = SET/2026). Será **adicionado** na nova avaliação.
+- **Campo vazio a completar**: o período **já existe** no sistema, mas o Status ou o Nível daquele diretor está vazio (“Não informado”) e a planilha agora traz valor. A planilha **nunca substitui** um campo já preenchido — o novo valor entra na nova avaliação e passa a ser a referência mais recente daquele mês.
+- **Campo preservado**: período já existente com valor no sistema. Nenhuma linha atual é modificada (a importação é aditiva: nova avaliação + histórico repetido).
+
+### 18.4 Proteção dos ajustes manuais
+
+A regra já existente é mantida e agora fica **visível na prévia**: *ajuste manual ativo tem prioridade sobre valor repetido na nova planilha*. A prévia conta os ajustes ativos, mostra (em detalhes) o valor original da planilha × o valor vigente no sistema e sinaliza como pendência quando a nova planilha traz valor diferente de um ajuste. A confirmação da importação não altera `avaliacoes_diretores_ajustes`.
+
+### 18.5 Arquivo idêntico
+
+O hash SHA-256 passa a ser calculado **antes** da confirmação: se o arquivo for binariamente idêntico a uma avaliação já importada (com status diferente de `erro`), a prévia exibe “Este mesmo arquivo já foi importado anteriormente.” e **impede** a atualização. Uma nova versão legítima que repete o histórico e acrescenta um mês novo tem hash diferente e segue normalmente.
+
+### 18.6 Referência dinâmica dos indicadores e novos cadastros
+
+- A prévia mostra **Referência atual** (último período mensal já consolidado no sistema) e **Nova referência** (último período mensal válido reconhecido na nova planilha). Nenhum mês/ano é fixado no código e, depois da confirmação, o título da tela passa sozinho para “Indicadores de \<mês\> de \<ano\>”.
+- As Regionais, diretores e unidades novos identificados na prévia entram no banco junto com os registros da nova avaliação e aparecem automaticamente nos filtros Regional e Diretor depois do recarregamento — sem listas fixas no código e sem reiniciar o sistema.
+
+### 18.7 Arquivos alterados
+
+| Arquivo | Mudança |
+|---|---|
+| `src/services/previewService.js` | **novo** — `buildUpdatePreview` (comparação pura planilha × sistema) e `chavePeriodo`; nesta etapa: seções finalizadas, contagem de períodos identificados, registros preservados, Regionais novas, referência atual × nova e alertas de Status/Nível |
+| `src/components/ImportDialog.jsx` | reescrito como **prévia + resumo final de confirmação** (mantém `runImport`, metadados e tela de sucesso) |
+| `src/App.jsx` | `upload()` calcula o hash e consulta arquivos idênticos (leitura) antes de abrir a prévia; `ImportDialog` recebe `model` e `arquivosIguais` |
+| `src/services/importService.js` | **somente acompanhamento de progresso**: estágios `Atualizando períodos`, `Atualizando indicadores` e `Atualizando cadastros` (nenhuma alteração no que é gravado nem na ordem) |
+| `src/dataParser.js` | aditivo: `invalidMetricCells` (célula de indicador não numérica) para o alerta “indicador inválido” |
+| `src/styles.css` | estilos aditivos `.pv-*` das seções da prévia |
+
+### 18.8 Pendência: teste definitivo com a próxima planilha real
+
+Ainda **não existe a planilha real do mês seguinte**, então **nada foi persistido no Supabase como simulação**: a validação da interface foi feita com uma **cópia local de desenvolvimento** (fixture temporária fora do repositório, com coluna fictícia de período futuro, um campo antigo vazio e um ajuste manual existente), verificando as classificações e o cancelamento antes de qualquer gravação. Na conclusão da prévia (Etapa 5) a cópia temporária foi revalidada **fora do repositório** com 16 verificações aprovadas (período novo, completados, preservados, ajuste protegido, novos cadastros, referência dinâmica, bloqueio de arquivo idêntico e ausência de qualquer acesso a rede/banco na prévia). O **teste definitivo será realizado quando chegar a planilha real do próximo mês** (nova importação real: períodos novos, completados, preservados e ajustes intactos).
+
+## 19. Painel "Atualizar dados" (períodos, pontuações e indicadores) — 2026-10-16
+
+O botão **Atualizar dados** da Matriz histórica (visível apenas com um diretor específico selecionado) abre um painel de edição manual que **não altera nenhum dado importado**: tudo que o usuário digita fica em estrutura própria, e o valor vigente é resolvido em tempo de leitura. O painel tem três seções: *Cadastrar novo período*, *Editar ou completar um período* e *Pontuações e indicadores*.
+
+### 19.1 Períodos (seções 1 e 2 do painel)
+
+- **Cadastrar**: Mês (jan–dez), Ano (4 dígitos, dentro da janela das avaliações), Status (lista do sistema + valores já importados) e Nível (I–V). Gera rótulo normalizado (`OUT/2026`; `DEZ/4TRI 2026` em mar/jun/set/dez), ordem cronológica automática (reposicionando os períodos seguintes) e origem `cadastro_manual` em `avaliacoes_diretores_periodos` (coluna `origem`, aplicada por migration).
+- **Editar/completar**: seletor de período + Status/Nível. Mês e Ano são somente leitura; a alteração vira linha em `avaliacoes_diretores_ajustes` (mesma camada do botão "Editar" do gráfico), preservando o original da planilha.
+- **Vigência exibida**: ajuste manual > cadastro manual > valor importado; planilha futura não sobrescreve valores manuais.
+
+### 19.2 Pontuações e indicadores (seção 3 do painel) — novidade desta etapa
+
+- **Campos** (nomes amigáveis iguais aos cards/radar/matriz): NOTAS — Presencial, Acadêmico, Pós-graduação, Nota geral, Avaliação institucional; PERCENTUAIS — Ritmo de captação, Crescimento de matrículas, Evasão, EBITDA.
+- **Formatos**: notas aceitam vírgula ou ponto (sem faixa fixa — os dados reais são médias com várias casas); percentuais são digitados em **%** (10 = 10,0%) e gravados como **fração** (0.1), a mesma unidade do EAV e de `formatMetricCell` — nunca 1000%. Campo em branco **nunca vira zero**; só campos digitados **e diferentes do vigente** são gravados.
+- **Banco**: nova tabela `avaliacoes_diretores_indicadores_ajustes` (migration `20261016140000`, aplicada): `avaliacao_id`, `registro_id`, `chave`, `valor_original` (capturado 1× do importado e **nunca** atualizado), `valor_manual`, `origem` (`cadastro_manual` sem valor importado / `edicao_manual` substituindo o importado), `arquivada_em` + índice único parcial por (`registro_id`, `chave`) ativo. Privégios/RLS no mesmo padrão provisório dos ajustes de período (select/insert; update apenas em `valor_manual, origem, atualizado_por, updated_at, arquivada_em`; sem delete).
+- **Regra centralizada de vigência** (`buildDashboardModel`/`aplicarAjusteIndicadorNoModelo` em `dashboardService`): por registro e por chave — (1) ajuste do **próprio registro** vence; (2) senão o ajuste ativo mais recente do **mesmo diretor** em avaliação **anterior** (propagação apenas para planilhas futuras: a futura não sobrescreve o manual e o histórico anterior nunca é reescrito); (3) sem ajuste, valor importado. O registro guarda `metricas` (vigente), `metricasImportado` (auditável) e `metricasInfo` (origem/data por campo).
+- **Painel**: cada campo mostra vigente + origem e aceita novo valor; chips de prévia `vigente → novo`; resumo com registro de destino, nº de alterações pendentes e última atualização manual. Erro explícito quando não há nada diferente para salvar.
+- **Efeito em tempo real**: após a confirmação do banco o modelo é recalculado na hora (sem F5) — cards de indicadores, radar, médias consolidadas e colunas de indicadores da Matriz passam a exibir o valor manual. O histórico mensal de Status/Nível (evolução) não é afetado.
+
+### 19.3 Arquivos alterados
+
+| Arquivo | Mudança |
+|---|---|
+| `supabase/migrations/20261016140000_avaliacoes_diretores_indicadores_ajustes.sql` | **novo** — tabela + índice único parcial + RLS/privégios provisórios (aplicada no projeto) |
+| `src/services/indicadoresAjustesService.js` | **novo** — `CAMPOS_NOTA`/`CAMPOS_PERCENTUAL`, `parseValorIndicador`, `formatarEntradaIndicador`, `mesmoValorIndicador`, `salvarAjustesIndicadores` (atualiza a MESMA linha ativa; só grava campos alterados) |
+| `src/services/dashboardService.js` | busca `ajustesIndicadores` no carregamento; regra centralizada (`contextoDeAjustesIndicadores`, `metricasDoRegistro`), `metricasImportado`/`metricasInfo` nos registros e `aplicarAjusteIndicadorNoModelo` |
+| `src/components/PeriodosManuais.jsx` | seção "Pontuações e indicadores" (9 campos, prévia em chips, salvar pontuações) |
+| `src/App.jsx` | `aposSalvarPeriodo` com o caso `tipo: 'indicadores'` (atualiza o modelo e mostra a mensagem) |
+| `src/components/PerformanceMatrix.jsx` | texto do tooltip do botão "Atualizar dados" |
+| `docs/DOCUMENTACAO_AVALIACAO_DIRETORES.md` | esta seção |
+
+### 19.4 Validações
+
+- Nenhum dado fictício foi gravado; nenhuma alteração em upload, pareceres, filtros, identidade visual ou no cadastro de Mês/Ano/Status/Nível aprovado; `src/styles.css` intocado (só classes CSS existentes).
+- "Nota geral" vem **direto da coluna `GERAL`** da planilha (o parser não calcula): o sistema não inventa fórmula nova.
+- Conversões conferidas com os dados reais do banco: percentuais guardados como fração (ex.: Evasão média 0.1378 → 13,8%), notas numa escala observada de ~1,7 a ~5,4 (por isso sem faixa fixa de validação).
+- `npm run build` OK (`dist/assets/index-3eQUZHRT.js` 906,12 kB; apenas o aviso pré-existente de tamanho de chunk).

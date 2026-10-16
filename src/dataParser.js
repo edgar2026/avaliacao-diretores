@@ -120,6 +120,7 @@ export function analyzeRows(rows, sourceName='Planilha1'){
   const rowsWithoutDirector = nonEmptyRows.filter(row => !clean(row[directorCol])).length;
 
   const keyCounts = new Map();
+  const invalidMetricCells = [];
   const records = usableRows.map((row,idx)=>{
     const director=clean(row[directorCol]) || 'Diretor não informado';
     const unit=clean(row[unitCol]) || 'Unidade não informada';
@@ -127,7 +128,12 @@ export function analyzeRows(rows, sourceName='Planilha1'){
     const key=`${regional}|${director}|${unit}`;
     keyCounts.set(key,(keyCounts.get(key)||0)+1);
     const history=periods.map(p=>({period:p.label,stage:clean(row[p.valueCol])||'Não informado',level:clean(row[p.levelCol])||'Não informado'}));
-    const metrics={}; metricMap.forEach(m=>metrics[m.name]=m.index>=0 && isNumber(row[m.index]) ? row[m.index] : null);
+    const metrics={}; metricMap.forEach(m=>{
+      const rawv=m.index>=0?row[m.index]:null;
+      const presente=rawv!==null&&rawv!==undefined&&(typeof rawv==='string'?rawv.trim()!=='':true);
+      if(presente&&!isNumber(rawv))invalidMetricCells.push({diretor:director,unidade:unit,indicador:m.name,valor:clean(rawv)});
+      metrics[m.name]=m.index>=0 && isNumber(row[m.index]) ? row[m.index] : null;
+    });
     const indicators=indicatorColumns.map(ic=>{
       const value=row[ic.column];
       const numeric=isNumber(value)?value:null;
@@ -162,6 +168,7 @@ export function analyzeRows(rows, sourceName='Planilha1'){
     units: uniqSorted(records.map(r=>r.unit)),
     rowsWithoutDirector,
     duplicates,
+    invalidMetricCells,
     records,
     importedAt: new Date().toISOString()
   };

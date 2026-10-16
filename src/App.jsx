@@ -1,13 +1,18 @@
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {analyzeWorkbookBuffer} from './dataParser.js';
 import {validateSpreadsheetFile} from './services/fileValidator.js';
-import {loadPublishedDashboard,buildDashboardModel,regionalsOf,directorsOf,buildDirectorMonthlyEvolution,avgNumbers,recordMetric,countDistinctNames,matrixPeriodColumns,avaliacaoLabel} from './services/dashboardService.js';
-import {createObservacao,listObservacoesDiretor,updateObservacao,archiveObservacao,resolveObservacaoVinculo,formatarDataHora} from './services/observacoesService.js';
+import {loadPublishedDashboard,buildDashboardModel,regionalsOf,directorsOf,buildDirectorMonthlyEvolution,avgNumbers,recordMetric,countDistinctNames,matrixPeriodColumns,aplicarAjusteIndicadorNoModelo} from './services/dashboardService.js';
 import {isSupabaseConfigured} from './services/supabaseClient.js';
+import {computeSha256} from './services/hashService.js';
+import {findAvaliacoesByHash} from './services/avaliacoesService.js';
+import {opcoesStatus as opcoesStatusDoModelo,aplicarAjusteNoModelo,aplicarRestauracaoNoModelo} from './services/ajustesService.js';
+import {aplicarPeriodoManualNoModelo} from './services/periodosManuais.js';
 import ImportDialog from './components/ImportDialog.jsx';
-import ConfirmModal from './components/ConfirmModal.jsx';
+import EditorPeriodo from './components/EditorPeriodo.jsx';
+import PeriodosManuais from './components/PeriodosManuais.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import PerformanceMatrix from './components/PerformanceMatrix.jsx';
+import Pareceres from './components/Pareceres.jsx';
 import {MonthlyEvolutionChart,RadarChart} from './components/Charts.jsx';
 const avg=a=>avgNumbers(a);
 const fmt=(v,name='')=>v==null?'—':['Ritmo de captação','Crescimento de matrículas','Evasão','EBITDA'].includes(name)?`${(v*100).toLocaleString('pt-BR',{maximumFractionDigits:1,minimumFractionDigits:1})}%`:v.toLocaleString('pt-BR',{maximumFractionDigits:2,minimumFractionDigits:2});
@@ -21,13 +26,22 @@ export default function App(){
  const [model,setModel]=useState(null),[loading,setLoading]=useState(true),[loadError,setLoadError]=useState(''),
   [regional,setRegional]=useState(''),[director,setDirector]=useState(''),
   [message,setMessage]=useState(''),[pendingImport,setPendingImport]=useState(null);
- const [obsList,setObsList]=useState([]),[obsText,setObsText]=useState(''),[obsSaving,setObsSaving]=useState(false),
-  [obsLoading,setObsLoading]=useState(false),[editingId,setEditingId]=useState(null),[editText,setEditText]=useState(''),
-  [showAllObs,setShowAllObs]=useState(false);
- // Modal de confirmação do app (no lugar do window.confirm do navegador):
- // usado para Salvar alterações (edição) e Excluir. Guarda a ação a executar.
- const [confirmacao,setConfirmacao]=useState(null),[confirmErro,setConfirmErro]=useState('');
+  // A antiga área de OBSERVAÇÕES da lateral foi removida (título “Observação do
+  // regional”, campo de texto, botão “Salvar observação”, título/lista
+  // “Observações do regional” e a mensagem “Nenhuma observação registrada.”):
+  // criar, consultar, editar, excluir (lógico) e ver o histórico acontecem
+  // somente nos dois cards da área principal (Parecer do Regional e Parecer de
+  // Operações, em src/components/Pareceres.jsx). Nenhum dado do banco foi
+  // apagado e o CRUD não foi removido — apenas a interface mudou de lugar.
+
  const [indConsolidado,setIndConsolidado]=useState(false);
+ // Edição do STATUS e do NÍVEL do ÚLTIMO PERÍODO VÁLIDO do diretor (o período
+ // é sempre o identificado automaticamente — sem seletor de meses). O dado
+ // importado da planilha nunca é alterado: o ajuste fica em estrutura
+ // separada (avaliacoes_diretores_ajustes) e o valor vigente passa a ter
+ // prioridade sobre o importado.
+  const [editorAberto,setEditorAberto]=useState(false),[editorSucesso,setEditorSucesso]=useState(''),
+  [periodosAberto,setPeriodosAberto]=useState(false);
  const fileRef=useRef();
 
  // Sem variáveis de ambiente o usuário vê uma mensagem clara de configuração
@@ -48,10 +62,82 @@ export default function App(){
  // cabeçalhos da planilha, iniciando no primeiro mês com status ou nível
  // válido daquele diretor e seguindo até o último período da avaliação;
  // lacunas ficam no eixo sem ponto e sem zero (linha interrompida).
- const evolution=useMemo(()=>{
-  if(!model||!director)return null;
-  return buildDirectorMonthlyEvolution(visible,model.avaliacoes,director);
- },[model,director,visible]);
+  const evolution=useMemo(()=>{
+    if(!model||!director)return null;
+    return buildDirectorMonthlyEvolution(visible,model.avaliacoes,director);
+  },[model,director,visible]);
+
+  // Resumo do ÚLTIMO PONTO VÁLIDO da linha (o mesmo ponto que o gráfico
+  // desenha): rótulo ORIGINAL do período, status daquele período e nível
+  // plotado. Sem informação válida a interface mostra "Não informado" — nunca
+  // usa status de gestão, ciclo de vida, nível atual da unidade, indicadores
+  // nem pareceres. Exibido no canto superior direito do card, ao lado do
+  // título e dos textos explicativos, fora da área de desenho.
+  const evResumo=useMemo(()=>{
+    if(!evolution)return null;
+    const valores=evolution.series?.[0]?.valores||[];
+    const ROMANOS=['','I','II','III','IV','V'];
+    let i=-1;
+    for(let k=valores.length-1;k>=0;k--){const v=valores[k];if(typeof v==='number'&&Number.isFinite(v)){i=k;break;}if(evolution.periods?.[k]?.ajustado){i=k;break;}}
+    if(i<0)return null;
+    const p=evolution.periods[i]||{},v=valores[i];
+    const txt=x=>String(x??'').replace(/\s+/g,' ').trim();
+    return {periodo:txt(p.rotulo)||txt(p.label)||'',status:txt(p.status)||'',nivel:ROMANOS[v]||(Number.isFinite(v)?v.toFixed(1).replace('.',','):''),
+      // Único período editável: identificadores reais + situação do ajuste.
+      periodoId:p.periodoId||null,registroId:p.registroId||null,avaliacaoId:p.avaliacaoId||null,
+      ajustado:!!p.ajustado,statusOriginal:txt(p.statusOriginal)||'',nivelOriginal:p.nivelOriginal??null};
+  },[evolution]);
+
+  // Opções do formulário de edição: classificações do sistema (base) + valores
+  // válidos distintos já existentes nos períodos importados de TODOS os
+  // diretores. Nunca mistura ciclo de vida, status de gestão da unidade,
+  // pareceres, aprovação ou indicadores.
+  const estagiosImportados=useMemo(()=>{
+    const s=new Set();
+    for(const r of allRecords)for(const p of r.periodos||[]){const t=String(p.estagio??'').replace(/\s+/g,' ').trim();if(t)s.add(t);}
+    return [...s];
+  },[model]);
+  const statusOpcoes=useMemo(()=>opcoesStatusDoModelo(estagiosImportados),[estagiosImportados]);
+
+  // Sucesso é exibido no resumo e some sozinho (mensagem curta, sem novo card).
+  useEffect(()=>{
+    if(!editorSucesso)return;
+    const t=setTimeout(()=>setEditorSucesso(''),6000);
+    return ()=>clearTimeout(t);
+  },[editorSucesso]);
+
+  // Chamado APÓS o banco confirmar a gravação: o modelo em memória recebe o
+  // ajuste (resumo, último ponto do gráfico, tooltip e célula da matriz
+  // atualizam na hora) e o formulário fecha. Nada é aplicado antes da
+  // confirmação do banco.
+  function aposSalvarAjuste(ajuste){
+    setModel(m=>m?aplicarAjusteNoModelo(m,ajuste):m);
+    setEditorAberto(false);
+    setEditorSucesso('Status e nível atualizados com sucesso.');
+  }
+
+  // Painel "Atualizar dados" da Matriz: cadastro manual de período novo
+  // (linha com origem "cadastro manual"), ajuste de Status/Nível de um
+  // período existente (edição na própria linha da tabela) ou atualização de
+  // pontuações/indicadores (painel dedicado). O modelo é atualizado APÓS a
+  // confirmação do banco — cards, radar, matriz e gráfico mensal mudam na
+  // hora, sem F5; o painel permanece aberto para conferência (a tabela de
+  // períodos e a origem de cada linha são recalculadas pelo modelo novo).
+  function aposSalvarPeriodo(info){
+    if(info?.tipo==='cadastro'){
+      setModel(m=>m?aplicarPeriodoManualNoModelo(m,info):m);
+      setMessage(`Período ${info.rotulo} cadastrado com sucesso.`);
+    }else if(info?.tipo==='indicadores'){
+      setModel(m=>m?aplicarAjusteIndicadorNoModelo(m,info?.ajustes||[]):m);
+      setMessage(`Pontuações e indicadores atualizados com sucesso (${info?.total||0} campo(s)).`);
+    }else if(info?.tipo==='restaurar'){
+      setModel(m=>m?aplicarRestauracaoNoModelo(m,info):m);
+      setMessage('Valor importado restaurado (ajuste manual removido).');
+    }else{
+      setModel(m=>m?aplicarAjusteNoModelo(m,info?.ajuste):m);
+      setMessage('Status e nível atualizados com sucesso.');
+    }
+  }
 
  // INDICADORES: referência mais recente da avaliação = última coluna de
  // período na ordem cronológica dos dados (mesma regra da matriz). Título
@@ -71,146 +157,47 @@ export default function App(){
  // avaliação mais recente (sem simular histórico não armazenado).
  const visibleLatest=useMemo(()=>latestAvaliacaoId?visible.filter(r=>r.avaliacaoId===latestAvaliacaoId):visible,[visible,latestAvaliacaoId]);
 
- // Observação do regional: registro INDIVIDUAL vinculado ao diretor
- // selecionado (escopo 'diretor' + avaliação + registro). Sem regional e
- // diretor não há formulário nem lista. A troca de regional/diretor limpa a
- // lista na hora (nada do diretor anterior permanece na tela) e recarrega
- // pelo novo vínculo. Um token descarta respostas atrasadas: a resposta da
- // troca anterior nunca sobrescreve a lista do diretor atual.
- const obsReqRef=useRef(0);
- const obsVinculo=useMemo(()=>(!regional||!director)?null:resolveObservacaoVinculo(allRecords,model?.avaliacoes||[],{regional,diretor:director}),[model,allRecords,regional,director]);
- const obsDisponivel=Boolean(regional&&director);
- const avalObs=id=>{const a=(model?.avaliacoes||[]).find(x=>x.id===id);return a?avaliacaoLabel(a):'—';};
- async function loadObs(){
-  const reqId=++obsReqRef.current;
-  setObsList([]);
-  if(!obsDisponivel)return;
-  setObsLoading(true);
+ // Seleção da planilha: validação + análise LOCAIS (nada vai ao banco nem ao
+ // Storage nesta etapa). O hash é calculado apenas para reconhecer, já na
+ // prévia, um arquivo binariamente idêntico a um já importado (consulta de
+ // leitura). A gravação só acontece depois de "Confirmar atualização".
+ async function upload(e){
+  const file=e.target.files?.[0];if(!file)return;
   try{
-   const rows=await listObservacoesDiretor({registroId:obsVinculo?.registroId||null,avaliacaoId:obsVinculo?.avaliacaoId||null,regional,diretor:director});
-   if(reqId!==obsReqRef.current)return;
-   setObsList(rows);
-  }catch(err){if(reqId!==obsReqRef.current)return;console.error('[avaliacao-diretores] Falha ao carregar observações:',err?.message||String(err));setObsList([]);}
-  finally{if(reqId===obsReqRef.current)setObsLoading(false);}
+   const validation=validateSpreadsheetFile(file);
+   if(!validation.ok)throw new Error(validation.errors.join(' '));
+   const buffer=await file.arrayBuffer();
+   const analysis=analyzeWorkbookBuffer(buffer,file.name);
+   analysis.__buffer=buffer;
+   let arquivosIguais=[];
+   try{const hash=await computeSha256(buffer);arquivosIguais=await findAvaliacoesByHash(hash);}
+   catch(err){console.warn('[avaliacao-diretores] Verificação de arquivo idêntico indisponível:',err?.message||String(err));}
+   setPendingImport({file,analysis,arquivosIguais});
+  }catch(err){setMessage(`Erro: ${humanError(err.message)}`)}
+  finally{e.target.value=''}
  }
- useEffect(()=>{
-  setEditingId(null);setEditText('');setShowAllObs(false);setObsText('');
-  loadObs();
- },[regional,director,obsVinculo?.avaliacaoId]);
-
- async function saveObs(){
-  if(obsSaving)return;
-  const texto=obsText.trim();
-  if(!regional){setMessage('Selecione uma regional e um diretor para registrar ou consultar observações.');return;}
-  if(!director){setMessage('Selecione um diretor para registrar ou consultar observações.');return;}
-  if(!texto){setMessage('A observação não pode ficar vazia.');return;}
-  if(!obsVinculo?.avaliacaoId){setMessage('Erro: não foi possível identificar a avaliação do diretor selecionado.');return;}
-  setObsSaving(true);setMessage('');
-  try{
-   await createObservacao({avaliacaoId:obsVinculo.avaliacaoId,registroId:obsVinculo.registroId||null,regional,diretor:director,observacao:texto});
-   setObsText('');setMessage('Observação salva com sucesso.');await loadObs();
-  }catch(err){setMessage(`Erro: ${humanError(err.message)}`);}
-  finally{setObsSaving(false);}
- }
- // Editar: abre o modal de confirmação; a atualização (só texto, vínculo
- // preservado) só acontece após a confirmação.
- function pedirEdicao(){
-  if(obsSaving)return;
-  const texto=editText.trim();
-  if(!texto){setMessage('A observação não pode ficar vazia.');return;}
-  setMessage('');
-  setConfirmErro('');
-  setConfirmacao({
-   perigo:false,titulo:'Salvar alterações',textoConfirmar:'Salvar',
-   mensagem:'Confirmar as alterações nesta observação?',
-   executar:async()=>{
-    await updateObservacao({id:editingId,observacao:texto});
-    setEditingId(null);setEditText('');setMessage('Observação atualizada com sucesso.');await loadObs();
-   }
-  });
- }
- // Excluir: abre o modal de confirmação (exclusão lógica após confirmar).
- function pedirExclusao(o){
-  if(obsSaving)return;
-  setMessage('');
-  setConfirmErro('');
-  setConfirmacao({
-   perigo:true,titulo:'Excluir observação',textoConfirmar:'Excluir',
-   mensagem:'Excluir esta observação do diretor? Ela deixará de aparecer na lista.',
-   detalhe:[o?.diretor,o?.regional].filter(Boolean).join(' · ')+(o?.observacao?`\n“${o.observacao}”`:''),
-   executar:async()=>{
-    await archiveObservacao(o.id);
-    setMessage('Observação excluída com sucesso.');await loadObs();
-   }
-  });
- }
- async function executarConfirmacao(){
-  if(!confirmacao||obsSaving)return;
-  setObsSaving(true);setConfirmErro('');
-  try{await confirmacao.executar();setConfirmacao(null);}
-  catch(err){setConfirmErro(`Erro: ${humanError(err.message)}`);}
-  finally{setObsSaving(false);}
- }
- function fecharConfirmacao(){if(!obsSaving)setConfirmacao(null);}
-
- async function upload(e){const file=e.target.files?.[0];if(!file)return;try{const validation=validateSpreadsheetFile(file);if(!validation.ok)throw new Error(validation.errors.join(' '));const buffer=await file.arrayBuffer();const analysis=analyzeWorkbookBuffer(buffer,file.name);analysis.__buffer=buffer;setPendingImport({file,analysis})}catch(err){setMessage(`Erro: ${humanError(err.message)}`)}finally{e.target.value=''}}
- async function finishImport(result){setPendingImport(null);setMessage('Salvando avaliação…');await reload();setMessage(`Avaliação registrada: “${result.titulo}” (${result.trimestre}º tri/${result.ano}) · arquivo ${result.arquivoNome} · ${result.totalRegistros} registros.`);}
+ async function finishImport(result){setPendingImport(null);setMessage('Salvando avaliação…');await reload();setMessage(`Atualização concluída com sucesso: “${result.titulo}” (${result.trimestre}º tri/${result.ano}) · arquivo ${result.arquivoNome} · ${result.totalRegistros} registros.`);}
  const title=director?'Perfil do diretor':regional?'Desempenho da regional':'Desempenho geral';
  const subtitle=director||regional||'Todas as avaliações, lado a lado';
- const nAval=model?.avaliacoes.length||0;
- const badge=loading?'Carregando…':nAval===1?'1 avaliação disponível':`${nAval} avaliações disponíveis`;
+ // Selo “1 avaliação disponível” / “X avaliações disponíveis” REMOVIDO do
+ // cabeçalho (remoção somente visual: nenhuma avaliação apagada, nenhuma
+ // consulta alterada). O espaço liberado abriga a nova área de pareceres,
+ // logo abaixo da identificação do diretor e antes dos cards.
  return <div className="app">
   <aside className="sidebar"><div className="brand"><img className="brand-logo" src="/assets/logo-diretores.png" alt="SER Educacional — logo da Avaliação de Diretores"/><span className="brand-title">Avaliação de Diretores</span></div><div className="sub">Avaliação de desempenho dos diretores</div>
    <input ref={fileRef} hidden type="file" accept=".xlsx,.xls" onChange={upload}/><button className="upload" onClick={()=>fileRef.current.click()}><span>↑</span> Atualizar pela planilha</button>
    <label>Regional</label><select value={regional} onChange={e=>{setRegional(e.target.value);setDirector('')}} disabled={!model}><option value="">Todas as regionais</option>{regionals.map(x=><option key={x}>{x}</option>)}</select>
    <label>Diretor</label><select value={director} onChange={e=>setDirector(e.target.value)} disabled={!regional}><option value="">Todos os diretores</option>{directors.map(x=><option key={x}>{x}</option>)}</select>
    <div className="profile"><b>{director||regional||'Todas as regionais'}</b><span>{visible.length} registro(s) · {countDistinctNames(visible,'diretor')} diretor(es) · {visibleAvaliacaoIds.length} avaliação(ões)</span></div>
-   <label>Observação do regional</label>
-   <textarea id="note" value={obsText} onChange={e=>setObsText(e.target.value)} placeholder="Registre uma observação..." disabled={!obsDisponivel}/>
-   {!regional&&<div className="obs-hint">Selecione uma regional e um diretor para registrar ou consultar observações.</div>}
-   {regional&&!director&&<div className="obs-hint">Selecione um diretor para registrar ou consultar observações.</div>}
-   <button className="save" onClick={saveObs} disabled={obsSaving||!obsDisponivel}>{obsSaving?'Salvando…':'Salvar observação'}</button>
    {message&&<div className="message">{message}</div>}
-   {obsDisponivel&&<>
-    <label>Observações do regional</label>
-    {obsLoading&&<div className="obs-loading">Carregando observações…</div>}
-    {!obsLoading&&obsList.length===0&&<div className="obs-empty">Nenhuma observação registrada.</div>}
-    {!obsLoading&&obsList.length>0&&<div className="obs-list">
-     {(showAllObs?obsList:obsList.slice(0,3)).map(o=>
-      editingId===o.id?
-       <div className="obs-item editing" key={o.id}>
-        <textarea value={editText} onChange={e=>setEditText(e.target.value)}/>
-        <div className="obs-actions">
-         <button className="save" onClick={pedirEdicao} disabled={obsSaving}>Salvar alterações</button>
-         <button className="obs-btn" onClick={()=>{setEditingId(null);setEditText('');}}>Cancelar</button>
-        </div>
-       </div>
-      :
-       <div className="obs-item" key={o.id}>
-        <div className="obs-meta">
-         <span className="obs-diretor">{o.diretor||'—'}</span>
-         {o.regional&&<span className="obs-regional">{o.regional}</span>}
-         <span className="obs-avaliacao">{avalObs(o.avaliacao_id)}</span>
-         <span className="obs-data">{formatarDataHora(o.created_at)}</span>
-        </div>
-        <p>{o.observacao}</p>
-        <div className="obs-actions">
-         <button className="obs-btn" onClick={()=>{setEditingId(o.id);setEditText(o.observacao);}} disabled={obsSaving}>Editar</button>
-          <button className="obs-btn danger" onClick={()=>pedirExclusao(o)} disabled={obsSaving}>Excluir</button>
-        </div>
-       </div>
-     )}
-     {obsList.length>3&&!showAllObs&&<button className="obs-btn" onClick={()=>setShowAllObs(true)}>Ver todas ({obsList.length})</button>}
-     {showAllObs&&obsList.length>3&&<button className="obs-btn" onClick={()=>setShowAllObs(false)}>Mostrar menos</button>}
-    </div>}
-   </>}
   </aside>
   <ErrorBoundary>
-  <main><header><div><small>Avaliação colegiada de performance</small><h1>{title}</h1><p>{subtitle}</p></div><span className="badge">{badge}</span></header>
+  <main><header><div><small>Avaliação colegiada de performance</small><h1>{title}</h1><p>{subtitle}</p></div></header>
    {loading&&<section className="empty-state"><h2>Carregando avaliações…</h2><p>Aguarde um instante.</p></section>}
    {!loading&&loadError&&<section className="empty-state"><h2>Não foi possível carregar as avaliações</h2><p>Tente novamente em instantes.</p><button className="save" onClick={reload}>Tentar novamente</button></section>}
    {!loading&&!loadError&&model&&model.avaliacoes.length===0&&<section className="empty-state"><h2>Nenhuma avaliação disponível ainda</h2><p>Use “Atualizar pela planilha” para importar um arquivo. As avaliações importadas ficam disponíveis automaticamente e permanecem após recarregar a página.</p></section>}
    {!loading&&!loadError&&model&&model.avaliacoes.length>0&&<>
+     <Pareceres regional={regional} diretor={director} registros={model.registros} avaliacoes={model.avaliacoes}/>
      <section className="kpis">{[['Diretores',countDistinctNames(visible,'diretor')],['Unidades',countDistinctNames(visible,'unidade')],['Nota geral',fmt(avg(visible.map(r=>recordMetric(r,'Nota geral'))))],['Avaliações',visibleAvaliacaoIds.length]].map(([a,b])=><article key={a}><span>{a}</span><strong>{b}</strong></article>)}</section>
      <div className="stack">
        <section className="card">
@@ -229,15 +216,25 @@ export default function App(){
          return <div className="metric" key={n}><span>{n}</span><strong>{txt(indConsolidado?vSel:vUlt)}</strong>{indConsolidado&&<small>Consolidado: {txt(vGeral)}</small>}</div>;
         })}</div>
        </section>
-        {evolution&&<section className="card evolution-card"><h2>Evolução mensal do nível de desenvolvimento</h2><p className="ev-sub">Progressão do diretor entre os níveis I e V ao longo dos meses avaliados.</p><p className="ev-note">Os níveis representam a classificação de desenvolvimento registrada na planilha e não correspondem às notas dos indicadores.</p><ErrorBoundary titulo="Não foi possível desenhar o gráfico de evolução"><div className="chart"><MonthlyEvolutionChart periods={evolution.periods} series={evolution.series}/></div></ErrorBoundary><div className="legend"><i className="sel"/>Período mensal<i className="quarter"/>Fechamento trimestral</div></section>}
-     <section className="card radar-card"><h2>Comparação de desempenho</h2><p>Seleção atual versus média geral.</p><ErrorBoundary titulo="Não foi possível desenhar o gráfico de indicadores"><div className="chart"><RadarChart records={visible} allRecords={allRecords}/></div></ErrorBoundary><div className="legend center"><i className="sel"/>Seleção atual <i className="all"/>Média geral</div></section>
-     <section className="card"><h2>Matriz histórica de desempenho</h2><p>Reprodução da planilha original: histórico por período, situação atual e indicadores.</p><PerformanceMatrix records={visible} allRecords={allRecords} avaliacoes={model.avaliacoes}/></section>
+      <section className="card radar-card"><h2>Comparação de desempenho</h2><p>Seleção atual versus média geral.</p><ErrorBoundary titulo="Não foi possível desenhar o gráfico de indicadores"><div className="chart"><RadarChart records={visible} allRecords={allRecords}/></div></ErrorBoundary><div className="legend center"><i className="sel"/>Seleção atual <i className="all"/>Média geral</div></section>
+      {/* Ordem dos gráficos: primeiro a Comparação de desempenho, depois a
+          Evolução mensal do nível de desenvolvimento (apenas movimentação —
+          nenhum gráfico, dimensão, dado ou regra foi alterado). O resumo do
+          último período válido ocupa o canto superior direito do card, ao lado
+          do título e dos textos — nunca dentro da área do gráfico. */}
+      {evolution&&<section className="card evolution-card"><div className="ev-topo"><div className="ev-textos"><h2>Evolução mensal do nível de desenvolvimento</h2><p className="ev-sub">Progressão do diretor entre os níveis I e V ao longo dos meses avaliados.</p></div>{evResumo&&<div className="ev-resumo"><div><b>Período:</b> {evResumo.periodo||'Não informado'}</div><div><b>Status:</b> {evResumo.status||'Não informado'}</div><div><b>Nível:</b> {evResumo.nivel||'Não informado'}</div>{evResumo.ajustado&&<div className="ev-ajuste">Atualizado no sistema</div>}{evResumo.periodoId&&<button type="button" className="ev-editar" onClick={()=>{setEditorSucesso('');setEditorAberto(true);}}>Editar</button>}{editorSucesso&&<div className="ev-sucesso" role="status">{editorSucesso}</div>}</div>}</div><ErrorBoundary titulo="Não foi possível desenhar o gráfico de evolução"><div className="chart"><MonthlyEvolutionChart periods={evolution.periods} series={evolution.series}/></div></ErrorBoundary><div className="legend"><i className="sel"/>Período mensal<i className="quarter"/>Fechamento trimestral</div></section>}
+      <section className="card"><h2>Matriz histórica de desempenho</h2><p>Reprodução da planilha original: histórico por período, situação atual e indicadores.</p><PerformanceMatrix records={visible} allRecords={allRecords} avaliacoes={model.avaliacoes} podeAtualizarDados={!!director} onAtualizarDados={()=>setPeriodosAberto(true)}/></section>
     </div>
    </>}
   <footer className="page-footer">Desenvolvido por V3LOZ</footer>
   </main>
   </ErrorBoundary>
-  {pendingImport&&<ImportDialog file={pendingImport.file} analysis={pendingImport.analysis} onCancel={()=>setPendingImport(null)} onImported={finishImport}/>}
-  <ConfirmModal aberto={!!confirmacao} titulo={confirmacao?.titulo||''} mensagem={confirmacao?.mensagem||''} detalhe={confirmacao?.detalhe} textoConfirmar={confirmacao?.textoConfirmar||'Confirmar'} perigo={!!confirmacao?.perigo} ocupado={obsSaving} erro={confirmErro} onConfirm={executarConfirmacao} onCancel={fecharConfirmacao}/>
+  {pendingImport&&<ImportDialog file={pendingImport.file} analysis={pendingImport.analysis} model={model} arquivosIguais={pendingImport.arquivosIguais} onCancel={()=>setPendingImport(null)} onImported={finishImport}/>}
+  {/* Edição do Status/Nível do último período válido (só com diretor
+      específico selecionado — sem diretor não há resumo nem botão). */}
+  {editorAberto&&evResumo&&evResumo.periodoId&&<EditorPeriodo resumo={evResumo} opcoesStatus={statusOpcoes} onSalvo={aposSalvarAjuste} onFechar={()=>setEditorAberto(false)}/>}
+  {/* Cadastro/edição manual de períodos pela Matriz (somente com diretor
+      específico selecionado). */}
+  {periodosAberto&&director&&model&&<PeriodosManuais registros={visible} avaliacoes={model.avaliacoes} statusOpcoes={statusOpcoes} onSalvo={aposSalvarPeriodo} onFechar={()=>setPeriodosAberto(false)}/>}
  </div>
 }
