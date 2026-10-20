@@ -21,6 +21,24 @@ const MESES_NOME={JAN:'janeiro',FEV:'fevereiro',MAR:'março',ABR:'abril',MAI:'ma
 // Exibição amigável de erros na interface: nomes internos (aba do arquivo,
 // serviços de dados, envio e regras de acesso) aparecem em linguagem simples.
 const humanError=m=>String(m||'').replace(/aba chamada Planilha1/gi,'aba principal da planilha').replace(/Planilha1/gi,'planilha').replace(/VITE_SUPABASE_[A-Z_]+|SUPABASE_[A-Z_]+/gi,'a configuração').replace(/\bSupabase\b/gi,'sistema de dados').replace(/Storage/g,'o envio do arquivo').replace(/\bRLS\b/g,'as regras de acesso');
+// Paleta ÚNICA do Status no resumo do card de evolução (subcard + etiqueta).
+// Uma só função decide as cores: normaliza caixa e espaços extras, reconhece
+// Supervisão I/II, Gestão I/II e Delegação I/II; qualquer outra classificação
+// (Acompanhamento, Reposicionamento, "Não informado", etc.) fica NEUTRA — sem
+// herdar vermelho, amarelo ou verde. A cor vale só para o subcard e a etiqueta.
+const PALETAS_STATUS={
+  'st-supervisao':{fundo:'#FEF2F2',borda:'#EF4444',etiqueta:'#EF4444',etiquetaTexto:'#FFFFFF'},
+  'st-gestao':{fundo:'#FFFBEB',borda:'#FACC15',etiqueta:'#FACC15',etiquetaTexto:'#422006'},
+  'st-delegacao':{fundo:'#F0FDF4',borda:'#22C55E',etiqueta:'#22C55E',etiquetaTexto:'#FFFFFF'},
+  'st-neutro':{fundo:'#F1F5F9',borda:'#94A3B8',etiqueta:'#64748B',etiquetaTexto:'#FFFFFF'}
+};
+const paletaStatus=s=>{
+  const t=String(s??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
+  if(/^supervisao (i|ii)$/.test(t))return 'st-supervisao';
+  if(/^gestao (i|ii)$/.test(t))return 'st-gestao';
+  if(/^delegacao (i|ii)$/.test(t))return 'st-delegacao';
+  return 'st-neutro';
+};
 
 export default function App(){
  const [model,setModel]=useState(null),[loading,setLoading]=useState(true),[loadError,setLoadError]=useState(''),
@@ -177,8 +195,12 @@ export default function App(){
   finally{e.target.value=''}
  }
  async function finishImport(result){setPendingImport(null);setMessage('Salvando avaliação…');await reload();setMessage(`Atualização concluída com sucesso: “${result.titulo}” (${result.trimestre}º tri/${result.ano}) · arquivo ${result.arquivoNome} · ${result.totalRegistros} registros.`);}
- const title=director?'Perfil do diretor':regional?'Desempenho da regional':'Desempenho geral';
- const subtitle=director||regional||'Todas as avaliações, lado a lado';
+  const title=director?'Perfil do diretor':regional?'Desempenho da regional':'Desempenho geral';
+  const subtitle=director||regional||'Todas as avaliações, lado a lado';
+  // Cores do SUBCARD de resumo (fundo, borda e etiqueta) resolvidas por UMA
+  // única configuração — mudam automaticamente ao confirmar a edição do Status.
+  const evPaleta=evResumo?PALETAS_STATUS[paletaStatus(evResumo.status)]:null;
+  const evEstilo=evPaleta?{'--ev-fundo':evPaleta.fundo,'--ev-borda':evPaleta.borda,'--ev-etq':evPaleta.etiqueta,'--ev-etq-texto':evPaleta.etiquetaTexto}:null;
  // Selo “1 avaliação disponível” / “X avaliações disponíveis” REMOVIDO do
  // cabeçalho (remoção somente visual: nenhuma avaliação apagada, nenhuma
  // consulta alterada). O espaço liberado abriga a nova área de pareceres,
@@ -222,7 +244,7 @@ export default function App(){
           nenhum gráfico, dimensão, dado ou regra foi alterado). O resumo do
           último período válido ocupa o canto superior direito do card, ao lado
           do título e dos textos — nunca dentro da área do gráfico. */}
-      {evolution&&<section className="card evolution-card"><div className="ev-topo"><div className="ev-textos"><h2>Evolução mensal do nível de desenvolvimento</h2><p className="ev-sub">Progressão do diretor entre os níveis I e V ao longo dos meses avaliados.</p></div>{evResumo&&<div className="ev-resumo"><div><b>Período:</b> {evResumo.periodo||'Não informado'}</div><div><b>Status:</b> {evResumo.status||'Não informado'}</div><div><b>Nível:</b> {evResumo.nivel||'Não informado'}</div>{evResumo.ajustado&&<div className="ev-ajuste">Atualizado no sistema</div>}{evResumo.periodoId&&<button type="button" className="ev-editar" onClick={()=>{setEditorSucesso('');setEditorAberto(true);}}>Editar</button>}{editorSucesso&&<div className="ev-sucesso" role="status">{editorSucesso}</div>}</div>}</div><ErrorBoundary titulo="Não foi possível desenhar o gráfico de evolução"><div className="chart"><MonthlyEvolutionChart periods={evolution.periods} series={evolution.series}/></div></ErrorBoundary><div className="legend"><i className="sel"/>Período mensal<i className="quarter"/>Fechamento trimestral</div></section>}
+      {evolution&&<section className="card evolution-card"><div className="ev-topo"><div className="ev-textos"><h2>Evolução mensal do nível de desenvolvimento</h2><p className="ev-sub">Progressão do diretor entre os níveis I e V ao longo dos meses avaliados.</p></div>{evResumo&&<div className="ev-resumo" style={evEstilo}><div className="ev-linha"><b>Período:</b> <span className="ev-valor">{evResumo.periodo||'Não informado'}</span></div><div className="ev-linha ev-linha-status"><b>Status:</b> <span className="ev-badge">{evResumo.status||'Não informado'}</span></div><div className="ev-linha"><b>Nível:</b> <span className="ev-nivel">{evResumo.nivel||'Não informado'}</span></div>{evResumo.ajustado&&<div className="ev-ajuste">Atualizado no sistema</div>}{evResumo.periodoId&&<button type="button" className="ev-editar" onClick={()=>{setEditorSucesso('');setEditorAberto(true);}}>Editar</button>}{editorSucesso&&<div className="ev-sucesso" role="status">{editorSucesso}</div>}</div>}</div><ErrorBoundary titulo="Não foi possível desenhar o gráfico de evolução"><div className="chart"><MonthlyEvolutionChart periods={evolution.periods} series={evolution.series}/></div></ErrorBoundary><div className="legend"><i className="sel"/>Período mensal<i className="quarter"/>Fechamento trimestral</div></section>}
       <section className="card"><h2>Matriz histórica de desempenho</h2><p>Reprodução da planilha original: histórico por período, situação atual e indicadores.</p><PerformanceMatrix records={visible} allRecords={allRecords} avaliacoes={model.avaliacoes} podeAtualizarDados={!!director} onAtualizarDados={()=>setPeriodosAberto(true)}/></section>
     </div>
    </>}

@@ -41,6 +41,14 @@
 .mx-btn:hover:not(:disabled){background:#eef7f9}
 .mx-btn:disabled{opacity:.5;cursor:default}
 .mx-bar .mx-btn:last-child{margin-left:auto}
+/* Status de Gestão: filtro fixo no cabeçalho da matriz (fora do painel de
+   filtros adicionais), com destaque quando há seleção ativa. */
+.mx-bar .mx-status-geral{display:flex;flex-direction:column;gap:4px;font-size:10px;color:#74868d;text-transform:uppercase;letter-spacing:.05em}
+.mx-bar .mx-status-geral select{border:1px solid #c4d5db;border-radius:9px;padding:7px 9px;background:#fff;color:#183844;font:inherit;font-size:12px;text-transform:none;letter-spacing:0;min-width:170px}
+.mx-bar .mx-status-geral.ativo select{border-color:var(--teal);box-shadow:0 0 0 3px rgba(8,127,149,.14);background:#f2fbfc;font-weight:700;color:#0d5464}
+.mx-bar .mx-status-geral.ativo span{color:#0d5464}
+.mx-aviso-export{font-size:11px;color:#8a5b12;background:#fff8e5;border:1px solid #ecd9a6;border-radius:9px;padding:7px 10px;margin:0 0 10px}
+.mx-aviso-export:empty{display:none}
 .mx-empty{font-size:12px;color:#5b7c88}
 .mx-scroll{max-height:62vh;overflow:auto;border:1px solid var(--line);border-radius:11px}
 .mx-table{border-collapse:separate;border-spacing:0;font-size:12px;width:max-content;min-width:100%}
@@ -263,21 +271,48 @@ header p{color:rgba(255,255,255,0.85)}
 .evolution-card .chart-svg .x-sub{font-size:11px;font-weight:600;fill:#a37f16}
 .evolution-card .legend{display:flex;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:13.5px;font-weight:500;color:#41606d}
 .evolution-card .legend i{width:12px;height:12px}
-/* Resumo do último PERÍODO VÁLIDO (período · status · nível): bloco compacto
-   alinhado à direita, ao lado do título e dos textos explicativos — fora da
-   área de desenho do gráfico (não cobre eixo, pontos, meses, níveis nem
-   legenda), sem novo card e sem alterar a altura do card. Em telas menores o
-   bloco ocupa uma linha própria, abaixo dos textos e antes do gráfico. */
+/* SUBCARD do último PERÍODO VÁLIDO (período · status · nível · Editar): bloco
+   compacto e destacado no canto superior direito, DENTRO do card principal e
+   fora da área de desenho do gráfico (não cobre eixo, pontos, meses, níveis,
+   fechamentos nem legenda), sem novo card e sem aumentar a altura do card.
+   Fundo/borda/etiqueta vêm de UMA única paleta por Status (PALETAS_STATUS em
+   App.jsx) via variáveis CSS; transição suave ao mudar o Status.
+   Em telas menores o subcard ocupa uma linha própria, abaixo dos textos e
+   antes do gráfico, em largura total. */
 .evolution-card .ev-topo{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:14px 18px}
 .evolution-card .ev-textos{flex:1 1 300px;min-width:0}
-.ev-resumo{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:2px;text-align:right;margin-top:2px;font-size:12px;line-height:1.55;color:#41606d}
-.ev-resumo b{color:#0e2f3b;font-weight:700}
+.ev-resumo{
+  flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:5px;
+  text-align:right;margin-top:2px;padding:16px 18px;
+  background:var(--ev-fundo,#F1F5F9);
+  border:2px solid var(--ev-borda,#94A3B8);
+  border-radius:14px;
+  box-shadow:0 1px 2px rgba(15,45,60,.06);
+  font-size:16px;line-height:1.35;color:#284854;
+  transition:background-color .25s ease,border-color .25s ease;
+}
+.ev-resumo .ev-linha{display:flex;align-items:center;justify-content:flex-end;gap:6px;white-space:nowrap}
+.ev-resumo .ev-linha-status{margin-top:5px}
+.ev-resumo b{color:#0e2f3b;font-weight:700;font-size:15px;letter-spacing:.01em}
+.ev-resumo .ev-valor{font-size:18px;font-weight:700;color:#0e2f3b}
+/* Etiqueta FORTE do Status (cor somente aqui, nunca no bloco inteiro). */
+.ev-badge{
+  display:inline-block;padding:3px 12px;border-radius:9px;
+  background:var(--ev-etq,#64748B);color:var(--ev-etq-texto,#FFFFFF);
+  font-size:17px;font-weight:700;line-height:1.3;letter-spacing:.01em;
+  transition:background-color .25s ease,color .25s ease;
+}
+/* Nível com destaque próprio (nunca herda a cor do Status). */
+.ev-resumo .ev-nivel{font-size:19px;font-weight:700;color:#0b4a5c}
 /* Ajuste manual aplicado sobre o último período: indicação discreta (sem
    justificativa, sem novo card) mostrada no resumo após salvar. */
 .ev-ajuste{font-size:11px;font-style:italic;color:#5b7c88;margin-top:2px}
-/* Botão discreto de edição do Status/Nível do último período válido. */
-.ev-editar{border:1px solid #c4d5db;background:#fff;border-radius:8px;padding:3px 10px;font:inherit;font-size:11px;line-height:1.4;color:#153744;cursor:pointer;margin-top:4px}
-.ev-editar:hover{background:#e7f3f6;border-color:#9fcedb}
+/* Botão de edição do Status/Nível: azul-petróleo principal do sistema
+   (var(--teal)) — apenas o estilo visual mudou; ação, modal e regra intactos. */
+.ev-editar{align-self:flex-end;border:1px solid transparent;background:var(--teal);border-radius:9px;padding:5px 13px;font:inherit;font-size:12px;font-weight:700;line-height:1.4;color:#fff;cursor:pointer;margin-top:7px;transition:background-color .15s ease,box-shadow .15s ease}
+.ev-editar:hover{background:#076e82}
+.ev-editar:focus-visible{outline:2px solid #04525f;outline-offset:2px}
+.ev-editar:active{transform:translateY(1px)}
 .ev-sucesso{font-size:11px;color:#1d6b47;background:#e8f6ee;border-radius:8px;padding:3px 8px;margin-top:4px}
 /* Período do formulário de edição: somente leitura (não há seletor de meses). */
 .editor-periodo .meta-form input[readonly]{background:#f3f7f9;color:#5b7c88;cursor:default}
@@ -343,10 +378,12 @@ header p{color:rgba(255,255,255,0.85)}
   .evolution-card .chart-svg .val{font-size:11px}
   .evolution-card .chart-svg .x-label{font-size:10px;letter-spacing:-.03em}
   .evolution-card .chart-svg .x-sub{font-size:10px}
-  .ev-resumo{font-size:11.5px}
+  .ev-resumo{font-size:16px}
 }
 @media(max-width:900px){
   .ev-resumo{flex:1 1 100%;align-items:flex-start;text-align:left;margin-top:0}
+  .ev-resumo .ev-linha{justify-content:flex-start}
+  .ev-resumo .ev-editar{align-self:flex-start}
 }
 @media(max-width:760px){
   .evolution-card h2{font-size:20px}
@@ -357,7 +394,8 @@ header p{color:rgba(255,255,255,0.85)}
   .evolution-card .chart-svg .x-label{font-size:12px}
   .evolution-card .chart-svg .x-sub{font-size:11px}
   .evolution-card .legend{font-size:13px}
-  .ev-resumo{font-size:12px}
+  .ev-resumo{font-size:16px;gap:6px;padding:16px}
+  .ev-resumo .ev-linha{white-space:normal;flex-wrap:wrap}
 }
 
 /* --- 13. Acessibilidade --- */

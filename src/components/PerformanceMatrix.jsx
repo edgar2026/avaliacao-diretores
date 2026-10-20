@@ -8,6 +8,11 @@ import {
   MATRIX_INDICATORS
 } from '../services/dashboardService.js';
 import { friendlyMetricName } from '../dataParser.js';
+import {
+  buildMatrixExportPayload,
+  exportMatrixExcel,
+  nomeArquivoMatriz
+} from '../services/matrixExportService.js';
 
 const norm = v => String(v ?? '').replace(/\s+/g, ' ').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
 const isEmpty = v => v == null || String(v).trim() === '';
@@ -31,8 +36,11 @@ export default function PerformanceMatrix({ records, allRecords, avaliacoes, pod
   const scrollRef = useRef(null);
   const set = (k, v) => setF(prev => ({ ...prev, [k]: v, ...(k === 'periodo' ? { statusTrimestral: '', nivel: '' } : {}) }));
   const clear = () => setF({ regional: '', diretor: '', unidade: '', periodo: '', statusTrimestral: '', nivel: '', statusGestao: '', cicloVida: '' });
-  const activeFilters = Object.values(f).filter(Boolean).length;
+  // Contagem do botão considera apenas os filtros ADICIONAIS (o Status de Gestão
+  // tem etiqueta própria e sempre visível). Limpar filtros zera os dois grupos.
+  const activeFilters = Object.entries(f).filter(([k, v]) => k !== 'statusGestao' && !!v).length;
   const filtersLabel = filtersOpen ? 'Ocultar filtros' : (activeFilters ? `Filtros (${activeFilters})` : 'Filtros');
+  const temStatusGestao = !!f.statusGestao;
 
   // Último período = última coluna na ordem cronológica dos dados
   // (avaliações da mais antiga para a mais recente + ordem das colunas na
@@ -115,6 +123,31 @@ export default function PerformanceMatrix({ records, allRecords, avaliacoes, pod
     return isEmpty(ind.valorTexto) ? '—' : ind.valorTexto;
   };
 
+  // Exportação (Excel): gerada no navegador a partir do MESMO `rows`,
+  // `shownCols` e `cellsOfCache` usados pela matriz na tela — mesma fonte do
+  // contador. Enquanto gera, o botão fica desabilitado.
+  const [gerando, setGerando] = useState('');
+  const [erroExport, setErroExport] = useState('');
+  const podeExportar = regs.length > 0 && rows.length > 0;
+  const gerar = async () => {
+    if (!podeExportar || gerando) return;
+    setErroExport('');
+    setGerando('excel');
+    try {
+      const payload = buildMatrixExportPayload({
+        rows, cellsOfCache, shownCols, extras, extraValue: extraCell,
+        f, showHistory, totalRegistros: regs.length,
+        ausencia: 'Não informado'
+      });
+      await exportMatrixExcel(payload, nomeArquivoMatriz(f, 'xlsx'));
+    } catch (err) {
+      console.error('[matriz] Falha ao exportar:', err);
+      setErroExport('Não foi possível gerar o arquivo Excel.');
+    } finally {
+      setGerando('');
+    }
+  };
+
   const opts = {
     regional: uniqueSorted(regs.map(r => r.regional)),
     diretor: uniqueSorted(regs.map(r => r.diretor)),
@@ -134,14 +167,26 @@ export default function PerformanceMatrix({ records, allRecords, avaliacoes, pod
   return (
     <div className="matrix">
       <div className="mx-bar">
+        {/* Status de Gestão: SEMPRE visível, mesmo com o painel de filtros fechado. */}
+        <label className={'mx-status-geral' + (temStatusGestao ? ' ativo' : '')}>
+          <span>Status de gestão</span>
+          <select value={f.statusGestao} onChange={e => set('statusGestao', e.target.value)} disabled={!regs.length}>
+            <option value="">Todos</option>
+            {opts.statusGestao.map(x => <option key={x} value={x}>{x}</option>)}
+          </select>
+        </label>
         <button className="mx-btn" type="button" onClick={() => setFiltersOpen(o => !o)} aria-expanded={filtersOpen}>{filtersLabel}</button>
         <span className="mx-count">{rows.length} de {regs.length} registro(s)</span>
+        <button className="mx-btn" type="button" onClick={gerar} disabled={!podeExportar || !!gerando} title={podeExportar ? `Baixar a matriz filtrada em Excel: ${nomeArquivoMatriz(f, 'xlsx')}` : 'Não há registros para exportar com os filtros atuais.'}>{gerando === 'excel' ? 'Gerando Excel...' : 'Baixar Excel'}</button>
         <button className="mx-btn" type="button" onClick={onAtualizarDados} disabled={!podeAtualizarDados} title={podeAtualizarDados ? 'Cadastrar ou editar períodos, pontuações e indicadores deste diretor' : 'Selecione um diretor específico na lateral para atualizar os dados.'}>Atualizar dados</button>
         <button className="mx-btn" type="button" onClick={toggleHistory} disabled={!periodCols.length}>{showHistory ? 'Ocultar histórico' : 'Ver histórico completo'}</button>
       </div>
+      {(erroExport || (regs.length > 0 && !rows.length)) && (
+        <p className="mx-aviso-export">{erroExport || 'Não há registros para exportar com os filtros atuais.'}</p>
+      )}
       {filtersOpen && (
         <div className="mx-filters">
-          {Object.keys(labels).map(k => (
+          {Object.keys(labels).filter(k => k !== 'statusGestao').map(k => (
             <label key={k}>{labels[k]}
               <select value={f[k]} onChange={e => set(k, e.target.value)} disabled={!regs.length}>
                 <option value="">Todos</option>
