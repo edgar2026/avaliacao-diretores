@@ -256,7 +256,9 @@ header p{color:rgba(255,255,255,0.85)}
 .evolution-card{padding:18px 14px}
 .evolution-card h2{font-size:22px;font-weight:700;color:#0e2f3b;letter-spacing:.005em;margin:0 0 4px}
 .evolution-card .ev-sub{font-size:14px;font-weight:400;line-height:1.35;color:#4a626d;margin:0 0 4px;max-width:84ch}
-.evolution-card .chart{height:296px}
+.evolution-card .chart{height:350px}
+.evolution-card .chart-evo{display:flex;flex-direction:column;height:100%;min-height:0}
+.evolution-card .chart-evo .chart-frame{flex:1 1 auto;height:auto;min-height:0}
 .evolution-card .chart-yaxis{flex:0 0 56px}
 .evolution-card .chart-scroll{height:100%}
 .evolution-card .chart-yaxis text{font-size:13px;font-weight:600;fill:#31505d}
@@ -271,6 +273,28 @@ header p{color:rgba(255,255,255,0.85)}
 .evolution-card .chart-svg .x-sub{font-size:11px;font-weight:600;fill:#a37f16}
 .evolution-card .legend{display:flex;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:13.5px;font-weight:500;color:#41606d}
 .evolution-card .legend i{width:12px;height:12px}
+/* --- FAIXA MENSAL DE STATUS (auxiliar isolado: StatusTimeline.jsx) ---
+   Etiqueta colorida por mês, alinhada ao ponto mensal, entre o rótulo do mês
+   e a referência trimestral. SOMENTE visual: não cria segunda linha, não cria
+   ponto extra e não altera dados. Para desfazer: apagar StatusTimeline.jsx e
+   remover seus usos em Charts.jsx (import, <StatusTimeline/> e
+   <StatusTimelineLegend/>) + este bloco de estilos. */
+.evolution-card .chart-svg .st-cell{cursor:pointer}
+.evolution-card .chart-svg .st-band.st-supervisao{fill:#EF4444}
+.evolution-card .chart-svg .st-band.st-gestao{fill:#FACC15}
+.evolution-card .chart-svg .st-band.st-delegacao{fill:#22C55E}
+.evolution-card .chart-svg .st-band.st-neutro{fill:#64748B}
+.evolution-card .chart-svg .st-label{font-size:10px;font-weight:700;letter-spacing:.02em;pointer-events:none}
+.evolution-card .chart-svg .st-text-supervisao,.evolution-card .chart-svg .st-text-delegacao,.evolution-card .chart-svg .st-text-neutro{fill:#FFFFFF}
+.evolution-card .chart-svg .st-text-gestao{fill:#422006}
+/* Legenda compacta das cores de Status (linha curta abaixo do gráfico). */
+.evolution-card .status-legend{display:flex;align-items:center;flex-wrap:wrap;gap:4px 14px;margin-top:6px;font-size:11.5px;font-weight:600;color:#41606d}
+.evolution-card .status-legend span{display:inline-flex;align-items:center;gap:5px}
+.evolution-card .status-legend i{width:10px;height:10px;border-radius:3px}
+.evolution-card .status-legend i.st-supervisao{background:#EF4444}
+.evolution-card .status-legend i.st-gestao{background:#FACC15}
+.evolution-card .status-legend i.st-delegacao{background:#22C55E}
+.evolution-card .status-legend i.st-neutro{background:#64748B}
 /* SUBCARD do último PERÍODO VÁLIDO (período · status · nível · Editar): bloco
    compacto e destacado no canto superior direito, DENTRO do card principal e
    fora da área de desenho do gráfico (não cobre eixo, pontos, meses, níveis,
@@ -373,11 +397,12 @@ header p{color:rgba(255,255,255,0.85)}
 .chart-tip span{display:block}
 @media(max-width:1440px){
   .evolution-card h2{font-size:20px}
-  .evolution-card .chart{height:262px}
+  .evolution-card .chart{height:316px}
   .evolution-card .chart-yaxis text{font-size:12px}
   .evolution-card .chart-svg .val{font-size:11px}
   .evolution-card .chart-svg .x-label{font-size:10px;letter-spacing:-.03em}
   .evolution-card .chart-svg .x-sub{font-size:10px}
+  .evolution-card .chart-svg .st-label{font-size:9px}
   .ev-resumo{font-size:16px}
 }
 @media(max-width:900px){
@@ -388,11 +413,12 @@ header p{color:rgba(255,255,255,0.85)}
 @media(max-width:760px){
   .evolution-card h2{font-size:20px}
   .evolution-card .ev-sub{font-size:14px}
-  .evolution-card .chart{height:300px}
+  .evolution-card .chart{height:354px}
   .evolution-card .chart-yaxis text{font-size:12px}
   .evolution-card .chart-svg .val{font-size:11px}
   .evolution-card .chart-svg .x-label{font-size:12px}
   .evolution-card .chart-svg .x-sub{font-size:11px}
+  .evolution-card .chart-svg .st-label{font-size:9px}
   .evolution-card .legend{font-size:13px}
   .ev-resumo{font-size:16px;gap:6px;padding:16px}
   .ev-resumo .ev-linha{white-space:normal;flex-wrap:wrap}

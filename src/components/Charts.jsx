@@ -1,5 +1,6 @@
 import React from 'react';
 import { buildRadarSeries } from '../services/dashboardService.js';
+import StatusTimeline,{StatusTimelineLegend} from './StatusTimeline.jsx';
 
 const fmtNivel=v=>Number.isInteger(v)?String(v):v.toFixed(1).replace('.',',');
 const ROMANO=['','I','II','III','IV','V'];
@@ -33,12 +34,21 @@ const MAX_VISIBLE_PERIODS_WITHOUT_SCROLL = 18;
  * Largura e altura responsivas via ResizeObserver (sem barra até
  * MAX_VISIBLE_PERIODS_WITHOUT_SCROLL períodos; gap mínimo de 96px por
  * período somente acima disso) e tooltip próprio em HTML.
+ *
+ * FAIXA DE STATUS (componente auxiliar ISOLADO StatusTimeline.jsx): abaixo do
+ * rótulo de cada mês e acima da referência trimestral, uma etiqueta colorida
+ * com o Status do MESMO período (Supervisão vermelho · Gestão amarelo ·
+ * Delegação verde · demais neutro). Sem segunda linha gráfico, sem ponto
+ * extra, sem tocar no valor do Nível. A faixa usa a mesma escala de x do
+ * gráfico e rola junto com ele. Para desfazer: remover StatusTimeline do
+ * import, do SVG e a legenda StatusTimelineLegend — o restante volta ao
+ * original.
  */
 export function MonthlyEvolutionChart({periods,series}){
  const labels=periods||[];
  const listas=series||[];
  if(!labels.length||!listas.length)return <p className="chart-empty">Sem períodos para exibir</p>;
-  const PAD=36,T=40,B=66,MIN_GAP=96;
+  const PAD=36,T=40,B=96,MIN_GAP=96;
  const scrollRef=React.useRef(null);
  const frameRef=React.useRef(null);
  const [availW,setAvailW]=React.useState(PAD*2+MIN_GAP*Math.max(0,labels.length-1));
@@ -93,53 +103,77 @@ export function MonthlyEvolutionChart({periods,series}){
    const corte=texto.lastIndexOf(' de ');
    triQuebra[i]=corte>0?[texto.slice(0,corte),texto.slice(corte+1)]:[texto];
  });
- const linhas=(p,v)=>{
-  const out=[periodoExtenso(p.label)];
-  if(p.status)out.push(`Estágio: ${p.status}`);
-  out.push(`Nível de desenvolvimento: ${ROMANO[v]||fmtNivel(v)}`);
-  // Ajuste manual: o valor VIGENTE acima difere do importado da planilha —
-  // o original aparece para consulta/auditoria (sem justificativa).
-  if(p.ajustado){
-   const difEstagio=(p.statusOriginal||'')!==(p.status||'');
-   const difNivel=p.nivelOriginal!=null&&p.nivelOriginal!==v;
-   if(difEstagio||difNivel)out.push(`Original da planilha: ${p.statusOriginal||'—'} · Nível ${ROMANO[p.nivelOriginal]||'—'}`);
-  }
-  if(p.quarterLabel)out.push(`Fechamento do ${p.quarterLabel}`);
-  return out;
- };
- const abre=(e,l)=>setTip({x:e.clientX,y:e.clientY,l});
- const mexe=e=>setTip(t=>t?{...t,x:e.clientX,y:e.clientY}:t);
- const fecha=()=>setTip(null);
- const tipLeft=tip?Math.max(8,Math.min(tip.x+16,((typeof window!=='undefined'&&window.innerWidth)||1200)-300)):8;
- return <div className="chart-frame" ref={frameRef}>
+  const linhas=(p,v)=>{
+   const out=[periodoExtenso(p.label)];
+   // Tooltip mostra SEMPRE o Status completo (nunca a abreviação da faixa) e
+   // "Não informado" quando o campo estiver ausente — sem repetir valores.
+   out.push(`Status: ${p.status||'Não informado'}`);
+   out.push(`Nível de desenvolvimento: ${v==null||!Number.isFinite(v)?'Não informado':(ROMANO[v]||fmtNivel(v))}`);
+   // Ajuste manual: o valor VIGENTE acima difere do importado da planilha —
+   // o original aparece para consulta/auditoria (sem justificativa).
+   if(p.ajustado){
+    const difEstagio=(p.statusOriginal||'')!==(p.status||'');
+    const difNivel=p.nivelOriginal!=null&&p.nivelOriginal!==v;
+    if(difEstagio||difNivel)out.push(`Original da planilha: ${p.statusOriginal||'—'} · Nível ${ROMANO[p.nivelOriginal]||'—'}`);
+   }
+   if(p.quarterLabel)out.push(`Fechamento do ${p.quarterLabel}`);
+   return out;
+  };
+  const abre=(e,l)=>setTip({x:e.clientX,y:e.clientY,l});
+  const mexe=e=>setTip(t=>t?{...t,x:e.clientX,y:e.clientY}:t);
+  const fecha=()=>setTip(null);
+  const tipLeft=tip?Math.max(8,Math.min(tip.x+16,((typeof window!=='undefined'&&window.innerWidth)||1200)-300)):8;
+  // Linhas do tooltip da FAIXA de Status: mesmo período do ponto mensal —
+  // Nível pode ser nulo (mês com Status sem Nível) e aparece "Não informado".
+  const infoFaixa=i=>{
+   const p=labels[i]||{};
+   const s=listas[0]||{};
+   const v=s.valores?s.valores[i]:null;
+   return linhas(p,v);
+  };
+  // Geometria da faixa de Status: entre o rótulo do mês (H-60) e a
+  // identificação trimestral (H-26/H-14). Retângulo de 18px alinhado a x(i).
+  const FAIXA_Y=H-56,FAIXA_H=18;
+  return <div className="chart-evo">
+   <div className="chart-frame" ref={frameRef}>
       <svg className="chart-yaxis" viewBox={`0 0 56 ${boxH}`} width={56} height={boxH}>{[1,2,3,4,5].map(nn=><text key={nn} x={50} y={y(nn)+4.5} textAnchor="end">Nível {ROMANO[nn]}</text>)}</svg>
-  <div className="chart-scroll" ref={scrollRef} style={{overflowX:comRolagem?'auto':'hidden'}}><svg className="chart-svg line" viewBox={`0 0 ${W} ${H}`} width={W} height={H} style={{width:comRolagem?W:'100%',height:H}}>
-   {[1,2,3,4,5].map(nn=><line key={nn} className="chart-grid" x1={PAD-14} y1={y(nn)} x2={W-PAD+14} y2={y(nn)}/>)}
-   {listas.map(s=><g key={s.key}>{segmentsDe(s.valores).map((seg,i)=><path key={i} className={`line-path line-${s.classe}`} d={path(seg)}/>)}</g>)}
-   {listas.map(s=><g key={s.key+'-pts'}>{s.valores.map((v,i)=>{
-      // Período sem informação: mês continua no eixo, sem ponto e sem valor —
-      // `segmentsDe` já interrompe a linha nesse ponto.
-      if(typeof v!=='number'||!Number.isFinite(v))return null;
-      const p=labels[i]||{};
-      const tri=!!p.isQuarter;
-      const px=x(i),py=y(v);
-      const info=linhas(p,v);
-      return <g key={i}>
-       <circle className={`dot ${tri?'dot-quarter':'dot-'+s.classe}`} cx={px} cy={py} r={tri?7.5:6}/>
+   <div className="chart-scroll" ref={scrollRef} style={{overflowX:comRolagem?'auto':'hidden'}}><svg className="chart-svg line" viewBox={`0 0 ${W} ${H}`} width={W} height={H} style={{width:comRolagem?W:'100%',height:H}}>
+    {[1,2,3,4,5].map(nn=><line key={nn} className="chart-grid" x1={PAD-14} y1={y(nn)} x2={W-PAD+14} y2={y(nn)}/>)}
+    {listas.map(s=><g key={s.key}>{segmentsDe(s.valores).map((seg,i)=><path key={i} className={`line-path line-${s.classe}`} d={path(seg)}/>)}</g>)}
+    {listas.map(s=><g key={s.key+'-pts'}>{s.valores.map((v,i)=>{
+       // Período sem informação: mês continua no eixo, sem ponto e sem valor —
+       // `segmentsDe` já interrompe a linha nesse ponto.
+       if(typeof v!=='number'||!Number.isFinite(v))return null;
+       const p=labels[i]||{};
+       const tri=!!p.isQuarter;
+       const px=x(i),py=y(v);
+       const info=linhas(p,v);
+       return <g key={i}>
+        <circle className={`dot ${tri?'dot-quarter':'dot-'+s.classe}`} cx={px} cy={py} r={tri?7.5:6}/>
         <text className={`val ${tri?'val-quarter':'val-'+s.classe}`} x={px} y={py-(tri?22:16)} textAnchor="middle">{ROMANO[v]||fmtNivel(v)}</text>
        <circle className="dot-hit" cx={px} cy={py} r={tri?13:10}
         onMouseEnter={e=>abre(e,info)} onMouseMove={mexe} onMouseLeave={fecha}/>
       </g>;
-    })}</g>)}
-   {labels.map((p,i)=><g key={p.label+i}>
-     <text className="x-label" x={x(i)} y={p.quarterLabel&&triQuebra[i]?H-34:H-30} textAnchor="middle">{p.label}</text>
-     {p.quarterLabel&&(triQuebra[i]
-       ? <text className="x-sub" x={x(i)} y={H-17} textAnchor="middle"><tspan x={x(i)} dy="0">{triQuebra[i][0]}</tspan>{triQuebra[i][1]&&<tspan x={x(i)} dy="12">{triQuebra[i][1]}</tspan>}</text>
-       : <text className="x-sub" x={x(i)} y={H-11} textAnchor="middle">{p.quarterLabel}</text>)}
-   </g>)}
-  </svg></div>
-  {tip&&<div className="chart-tip" style={{left:tipLeft,top:tip.y}}><b>{tip.l[0]}</b>{tip.l.slice(1).map((t,i)=><span key={i}>{t}</span>)}</div>}
- </div>;
+     })}</g>)}
+    {labels.map((p,i)=><g key={p.label+i}>
+      <text className="x-label" x={x(i)} y={H-60} textAnchor="middle">{p.label}</text>
+    </g>)}
+    {/* FAIXA DE STATUS — auxiliar isolado; remover a linha abaixo desfaz a
+        faixa sem afetar a linha do Nível. */}
+    <StatusTimeline periods={labels} x={x} gap={gap} yTop={FAIXA_Y} altura={FAIXA_H}
+      info={infoFaixa} abre={abre} mexe={mexe} fecha={fecha}/>
+    {labels.map((p,i)=><g key={'tri-'+p.label+i}>
+      {p.quarterLabel&&(triQuebra[i]
+        ? <text className="x-sub" x={x(i)} y={H-26} textAnchor="middle"><tspan x={x(i)} dy="0">{triQuebra[i][0]}</tspan>{triQuebra[i][1]&&<tspan x={x(i)} dy="12">{triQuebra[i][1]}</tspan>}</text>
+        : <text className="x-sub" x={x(i)} y={H-14} textAnchor="middle">{p.quarterLabel}</text>)}
+    </g>)}
+   </svg></div>
+   </div>
+   {/* Legenda compacta das cores de Status — também auxiliar; remover a linha
+       abaixo devolve a legenda ao formato original. */}
+   <StatusTimelineLegend/>
+   {tip&&<div className="chart-tip" style={{left:tipLeft,top:tip.y}}><b>{tip.l[0]}</b>{tip.l.slice(1).map((t,i)=><span key={i}>{t}</span>)}</div>}
+  </div>;
 }
 const names=['Presencial','Acadêmico','Pós-graduação','Nota geral','Avaliação institucional','Ritmo de captação','Crescimento de matrículas','Evasão','EBITDA'];
 // Normaliza para a escala 0..1 do radar. Indicador AUSENTE permanece `null`
