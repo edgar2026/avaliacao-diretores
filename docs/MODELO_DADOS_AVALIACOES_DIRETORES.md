@@ -58,26 +58,25 @@ Regras:
 - **Anti-duplicação por hash**: índice único parcial `uq_avaliacoes_diretores_hash_periodo (ano, trimestre, arquivo_hash) WHERE arquivo_hash IS NOT NULL AND status <> 'erro'` — o mesmo arquivo não pode ser reimportado no mesmo ano/trimestre; em outros períodos é permitido; tentativas falhas (`erro`) não bloqueiam o reenvio.
 - **Caminho único**: `uq_avaliacoes_diretores_storage_path (storage_path)` — nenhum objeto é sobrescrito.
 
-### 2.2 `avaliacoes_diretores_registros` — fotografia histórica das linhas
+### 2.2 `avaliacoes_diretores_registros` — entidade Diretor + Unidade (reutilizável)
 
 | Coluna | Tipo | Obrigatória | Observação |
 | --- | --- | --- | --- |
-| `id` | uuid PK | ✅ | |
-| `avaliacao_id` | uuid FK → `avaliacoes_diretores` | ✅ | `ON DELETE RESTRICT` |
-| `codigo_regional` | text | — | |
-| `regional` | text | — | valor no momento da importação |
-| `diretor` | text | ✅ | valor no momento da importação |
-| `unidade` | text | — | valor no momento da importação |
-| `status_gestao` | text | — | |
-| `ciclo_vida` | text | — | |
-| `nivel_atual` | text | — | |
-| `numero_linha_origem` | integer | — | linha na Planilha1 (rastro de auditoria) |
-| `dados_originais` | jsonb | ✅ | default `{}` — linha original completa |
-| `created_at` | timestamptz | ✅ | |
+| `id` | uuid PK | ✅ | **imutável** (trigger) |
+| `avaliacao_id` | uuid FK → `avaliacoes_diretores` | ✅ | `ON DELETE RESTRICT` — **atribuição da importação de CRIAÇÃO, imutável** (trigger); nas importações seguintes o registro é reutilizado, nunca re-vinculado |
+| `codigo_regional` | text | — | situação atual — atualizável pela planilha (valor presente e diferente) |
+| `regional` | text | — | situação atual — atualizável pela planilha |
+| `diretor` | text | ✅ | **parte da identidade — imutável** (trigger) |
+| `unidade` | text | — | **parte da identidade — imutável** (trigger) |
+| `status_gestao` | text | — | situação atual — atualizável pela planilha |
+| `ciclo_vida` | text | — | situação atual — atualizável pela planilha |
+| `nivel_atual` | text | — | situação atual — atualizável pela planilha |
+| `numero_linha_origem` | integer | — | linha da planilha de CRIAÇÃO (rastro de auditoria) |
+| `dados_originais` | jsonb | ✅ | default `{}` — linha original completa (criação) |
+| `arquivado_em` | timestamptz | — | **novo (2026-10-20)**: preenchido = registro fora dos dashboards; `NULL` = ativo (reativação). Arquivamento lógico — **nunca DELETE** |
+| `created_at` | timestamptz | ✅ | **imutável** (trigger) |
 
-**Regra de histórico:** `regional`, `diretor` e `unidade` são copiados da planilha e **não** são ligados a uma tabela de dimensões. Se uma regional mudar de nome ou um diretor for substituído amanhã, as avaliações antigas continuam mostrando o que valia na época. Uma nova importação cria novos registros com os valores novos.
-
-`dados_originais` guarda a linha crua (jsonb) para auditoria/reprocessamento sem depender da planilha original.
+**Regra de identidade (definitiva — Documentação §21):** o registro é uma **ENTIDADE** identificada por **(Diretor + Unidade) normalizados** e **reutilizado entre importações** — não é mais uma “fotografia” por importação. A planilha reutiliza a dupla ativa, reativa a dupla arquivada presente, arquiva a dupla ativa ausente e só cria registro novo quando a dupla não existe; a linha sem diretor ou sem unidade é ignorada. Mudanças de regional/status/ciclo/nível só alteram a **situação atual** (valor presente e diferente) e nunca a identidade. `dados_originais` guarda a linha da criação para auditoria/reprocessamento sem depender da planilha original.
 
 ### 2.3 `avaliacoes_diretores_periodos` — quantidade variável
 
@@ -91,7 +90,9 @@ Regras:
 | `nivel` | text | — | valor da coluna `NÍVEL` daquele período |
 | `created_at` | timestamptz | ✅ | |
 
-A Planilha1 cresce horizontalmente (pares período/estágio + `NÍVEL`). Como os períodos são **linhas**, a tabela absorve qualquer quantidade de períodos **sem mudança de schema** — é só inserir mais registros.
+A Planilha1 cresce horizontalmente (pares período/estágio + `NÍVEL`). Como os períodos são **linhas**, a tabela absorve qualquer quantidade de períodos **sem mudança de schema** — é só inserir mais períodos.
+
+**Escrita incremental (regra definitiva — Documentação §21):** a planilha **insere** períodos novos (ordem cronológica) e **atualiza** apenas `ordem` (reposição), `estagio`/`nivel` **quando vazios** (completar — marcadores contam como vazio). A migration `20261020150000` concede `grant update (ordem, estagio, nivel)` + política UPDATE provisória e a trigger `trg_..._bloqueia_sobreescrita` impede sobrescrita de valor preenchido e mudança de `rotulo_periodo`/`registro_id`.
 
 Índices: `registro_id` e `(registro_id, ordem)`.
 
@@ -111,6 +112,8 @@ A Planilha1 cresce horizontalmente (pares período/estágio + `NÍVEL`). Como os
 Indicadores **não** viram colunas do banco. Novos indicadores no arquivo futuro = novas linhas, sem `ALTER TABLE`. Índices: `registro_id`, `(registro_id, ordem)` e `nome_indicador` (permite localizar um indicador em todas as avaliações).
 
 Convenção de preenchimento: usar `valor_numerico` quando o valor for numérico e `valor_texto` no contrário (ambos anuláveis; nenhum dado é forçado).
+
+**Escrita incremental (regra definitiva — Documentação §21):** na reimportação, os valores do registro reutilizado são **atualizados** (`grant update (valor_numerico, valor_texto)` + política UPDATE provisória da migration `20261020150000`) — **exceto** quando existe ajuste manual ativo (tabela `avaliacoes_diretores_indicadores_ajustes`, prioridade inalterada). `nome_indicador` e `registro_id` nunca mudam; linha com ajuste divergente vira **divergência mantida** na prévia.
 
 ### 2.5 `avaliacoes_diretores_observacoes` — autoria e histórico
 
@@ -179,7 +182,7 @@ Boas práticas da etapa de upload:
 
 - **Sem login próprio**: a autenticação vem do sistema maior. O papel usado é `authenticated` + `auth.uid()`.
 - **`service_role` nunca no frontend**: usado apenas em backend/auditoria, se um dia for necessário.
-- **`anon` (fase 2, PROVISÓRIO)**: acesso restrito aos recursos do módulo para o protótipo funcionar sem login — select/insert nas 5 tabelas, update de fluxo em `avaliacoes_diretores` e upload/leitura no bucket do módulo. As políticas têm sufixo `_anon_provisorio` e **devem ser removidas** na integração com o sistema maior.
+- **`anon` (fase 2, PROVISÓRIO)**: acesso restrito aos recursos do módulo para o protótipo funcionar sem login — select/insert nas 5 tabelas, update de fluxo em `avaliacoes_diretores` e **update por coluna** em registros/periodos/indicadores (importação incremental — Documentação §21) e upload/leitura no bucket do módulo. As políticas têm sufixo `_anon_provisorio` e **devem ser removidas** na integração com o sistema maior.
 - **RLS habilitado** nas 5 tabelas (e já estava habilitado em `storage.objects`).
 
 ### 5.2 Matriz de políticas
@@ -187,13 +190,15 @@ Boas práticas da etapa de upload:
 | Tabela / recurso | SELECT | INSERT | UPDATE | DELETE |
 | --- | --- | --- | --- | --- |
 | `avaliacoes_diretores` | ✅ authenticated | ✅ authenticated | ✅ anon (provisório): só `processando` → `publicada`/`erro`, colunas do fluxo | ❌ |
-| `avaliacoes_diretores_registros` | ✅ authenticated | ✅ authenticated | ❌ | ❌ |
-| `avaliacoes_diretores_periodos` | ✅ authenticated | ✅ authenticated | ❌ | ❌ |
-| `avaliacoes_diretores_indicadores` | ✅ authenticated | ✅ authenticated | ❌ | ❌ |
+| `avaliacoes_diretores_registros` | ✅ authenticated | ✅ authenticated | ✅ anon (provisório, `20261020150000`): só `codigo_regional, regional, status_gestao, ciclo_vida, nivel_atual, arquivado_em` (situação + arquivar/reativar); identidade/`avaliacao_id` bloqueados por trigger | ❌ |
+| `avaliacoes_diretores_periodos` | ✅ authenticated | ✅ authenticated | ✅ anon (provisório, `20261020150000`): só `ordem, estagio, nivel` (reposição + completar campo vazio); sobreescrita/`rotulo_periodo`/`registro_id` bloqueados por trigger | ❌ |
+| `avaliacoes_diretores_indicadores` | ✅ authenticated | ✅ authenticated | ✅ anon (provisório, `20261020150000`): só `valor_numerico, valor_texto` (valores importados; ajuste manual continua em tabela própria) | ❌ |
 | `avaliacoes_diretores_observacoes` | ✅ authenticated | ✅ authenticated (`criado_por` = eu) | ✅ somente autor | ❌ |
 | `storage.objects` (bucket do módulo) | ✅ authenticated | ✅ authenticated | ❌ | ❌ |
-| `anon` (provisório, só recursos do módulo) | ✅ 5 tabelas + bucket | ✅ 5 tabelas + bucket | ✅ só avaliação em `processando` (colunas do fluxo) | ❌ |
+| `anon` (provisório, só recursos do módulo) | ✅ 5 tabelas + bucket | ✅ 5 tabelas + bucket | ✅ avaliação em `processando` (colunas do fluxo) + registros/periodos/indicadores nas colunas concedidas acima | ❌ |
 
+- Privilégios de UPDATE são **por coluna** (`grant update (colunas...)`); sem o privilégio, a política RLS não basta.
+- **Triggers de invariantes** (migration `20261020150000`, Documentação §21): `avaliacoes_diretores_periodos_bloqueia_sobreescrita` (só completa `estagio`/`nivel` vazios; `rotulo_periodo`/`registro_id` imutáveis) e `avaliacoes_diretores_registros_bloqueia_identidade` (`id`, `avaliacao_id`, `diretor`, `unidade`, `created_at` imutáveis).
 - Todas as políticas: `drop policy if exists` + `create policy`, nomeadas com prefixo `avaliacoes_...`, documentadas com `comment on policy`.
 - `auth.uid()` sempre como `(select auth.uid())` (evita reavaliação por linha / alerta do linter).
 - Função de trigger com `search_path` imobilizado.

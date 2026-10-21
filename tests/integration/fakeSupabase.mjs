@@ -22,6 +22,9 @@ export function createFakeSupabase(){
       update(patch){ s.op='update'; s.patch = patch; return api; },
       delete(){ s.op='delete'; return api; },
       eq(col,val){ s.filters.push(r => r[col] === val); return api; },
+      // PostgREST: .is(col, null) casa coluna NULA (usado por loadPublishedDashboard
+      // e pelos services de ajustes — arquivada_em/valor nulo).
+      is(col,val){ s.filters.push(r => val === null ? (r[col] == null) : r[col] === val); return api; },
       in(col,vals){ s.filters.push(r => vals.includes(r[col])); return api; },
       order(col,opts){ s.order.push({ col, desc: opts?.ascending === false }); return api; },
       range(from,to){ s.offset = from; s.limit = to - from + 1; return api; },

@@ -67,10 +67,10 @@ Sem essas variáveis, o app continua funcionando em modo local (dados de exemplo
 4. `INSERT` em `avaliacoes_diretores` com `status = 'processando'`.
 5. Upload do arquivo para `avaliacoes/{ano}/{trimestre}/{avaliacao_id}/{timestamp}-{nome-seguro}.xlsx` no bucket privado `avaliacoes-diretores-planilhas` (`upsert: false`).
 6. `UPDATE` do caminho/tamanho do arquivo na avaliação.
-7. `INSERT` em lote (500 por requisição) de:
-   - `avaliacoes_diretores_registros` — uma linha por diretor/unidade;
-   - `avaliacoes_diretores_periodos` — um par estágio+nível por período da planilha;
-   - `avaliacoes_diretores_indicadores` — EAV dinâmico: qualquer coluna de indicador detectada (`PRESENCIAL`, `EBITDA`, `%` etc.), com `valor_numerico` ou `valor_texto`.
+7. **Base fresca + plano (fonte única da regra — §21)**: `carregarBaseImportacao()` relê o estado atual (somente avaliações `publicada`) e `planejarAtualizacao()` (`src/services/importPlan.js`) calcula as ações — a MESMA função pura da prévia. Em seguida a gravação executa o plano em estágios:
+   - `registros` — `INSERT` só dos **novos** (com o `avaliacao_id` desta importação); `UPDATE` dos reutilizados (situação atual), **reativados** (`arquivado_em = null`) e **arquivados** (`arquivado_em = agora`);
+   - `periodos` — `INSERT` de períodos novos (ordem cronológica, completando a `ordem` dos vizinhos), `UPDATE` da `ordem` nas reposições e `UPDATE` de `estagio`/`nivel` **apenas onde estavam vazios** (completar);
+   - `indicadores` — `INSERT` de indicadores novos e `UPDATE` de `valor_numerico`/`valor_texto` (nunca de `nome_indicador`/`registro_id`; ajuste manual não é substituído).
 8. `UPDATE` final: `status = 'publicada'`, `publicado_em`, totais.
 9. **Falha em qualquer estágio**: a avaliação recebe `status = 'erro'` e `erro_detalhe` descreve o estágio; nada é apagado.
 
@@ -84,8 +84,13 @@ O protótipo **não tem login**. Para funcionar, a migration `20261013180000_ava
 | --- | --- |
 | 5 tabelas do módulo | `SELECT` e `INSERT` |
 | `avaliacoes_diretores` | `UPDATE` apenas de colunas do fluxo (`storage_*`, `arquivo_nome_original`, `total_*`, `status`, `publicado_em`, `erro_detalhe`) e apenas quando `status = 'processando'` → `publicada`/`erro` |
+| `avaliacoes_diretores_registros` | `UPDATE` só de `codigo_regional, regional, status_gestao, ciclo_vida, nivel_atual, arquivado_em` (reutilizar/arquivar/reativar — §21); identidade bloqueada por trigger |
+| `avaliacoes_diretores_periodos` | `UPDATE` só de `ordem, estagio, nivel` (reposição cronológica + completar campo vazio); sobreescrita de valor preenchido bloqueada por trigger |
+| `avaliacoes_diretores_indicadores` | `UPDATE` só de `valor_numerico, valor_texto` (valores importados; `nome_indicador`/`registro_id` intocáveis) |
 | Bucket `avaliacoes-diretores-planilhas` | `SELECT` e `INSERT` (upload) |
-| Qualquer coisa fora disso | ❌ — nada (sem DELETE, sem sobrescrita, sem outras tabelas/buckets) |
+| Qualquer coisa fora disso | ❌ — nada (sem DELETE, sem sobrescrita de identidade, sem outras tabelas/buckets) |
+
+Privilégios são por **coluna** (`grant update (colunas...)`) e as invariantes extra são garantidas por **triggers** (`20261020150000_avaliacoes_diretores_importacao_entidade.sql`, seção 4): período não muda `rotulo_periodo`/`registro_id` nem sobrescreve `estagio`/`nivel` preenchidos; registro não muda `id`/`avaliacao_id`/`diretor`/`unidade`/`created_at`.
 
 Todas as políticas `anon` têm sufixo `_anon_provisorio` e comentário `PROVISÓRIO`: **ao integrar ao sistema maior, devem ser removidas e substituídas** por políticas de usuário autenticado. `service_role` nunca é usado no frontend.
 
@@ -136,7 +141,8 @@ Os dashboards **não usam mais dados locais**: `src/data/initialRows.json` foi r
 
 ## 8. Estado do banco (dados reais)
 
-- **Estado atual**: o módulo contém **1 avaliação publicada** — `3TRI 2026 - STATUS DIRETORES UNIDADES` (3º tri/2026, 61 registros, 60 diretores válidos, 60 unidades), importada manualmente pelo usuário. As avaliações de teste automatizado anteriores (incluindo as resíduas `erro`) haviam sido **removidas** na limpeza da seção 11 do diagnóstico.
+- **Estado atual (após a limpeza de 2026-10-20 — ver §20)**: módulo **vazio** — 0 avaliações, 0 registros, 0 períodos, 0 indicadores, 0 ajustes, 0 pareceres/observações e bucket sem arquivos, aguardando a importação da planilha completa correta.
+- **Estado anterior (até 2026-10-20)**: o módulo continha **1 avaliação publicada** — `3TRI 2026 - STATUS DIRETORES UNIDADES` (3º tri/2026, 61 registros, 60 diretores válidos, 60 unidades), importada manualmente pelo usuário, além de resíduo de teste (2ª avaliação `erro`, ajustes e pareceres de teste). Tudo isso foi **removido** na limpeza da seção 20.
 - Os testes de integração **não recriam dados permanentes**: a importação roda contra um fake em memória (`tests/integration/fakeSupabase.mjs`); o dashboard e o RLS apenas leem/sorveem sem gravar.
 - Limpeza definitiva das políticas `anon` é **pendência da integração** com o sistema maior.
 - **Observações legadas sem diretor — resolvido**: as 2 linhas antigas com `escopo='regional'` e `diretor=NULL` (regional AISLANE BELO, arquivadas, resíduo de teste) **foram removidas do banco** (não eram atribuíveis a nenhum diretor). Toda observação existente tem agora `escopo='diretor'` com `registro_id` + `regional` + `diretor` preenchidos.
@@ -522,9 +528,9 @@ Depois que o usuário seleciona uma planilha em “Atualizar pela planilha”, o
 
 1. **Seleção do arquivo** → validação de extensão (.xlsx/.xls), tamanho (até 15 MB) e aba `Planilha1` (como antes).
 2. **Análise local** da planilha em memória (nada de rede além da consulta de hash) + **hash SHA-256** consultado no banco apenas para reconhecer arquivo já importado.
-3. **Comparação** com o modelo atual (períodos, diretores, unidades, ajustes manuais) montada por `src/services/previewService.js` (`buildUpdatePreview`) — função pura, sem gravação.
+3. **Comparação** com o modelo atual (períodos, diretores, unidades, ajustes manuais) montada por `src/services/previewService.js` (`buildUpdatePreview`) — função pura, sem gravação. Desde a regra definitiva (§21), o coração da prévia é **a mesma função `planejarAtualizacao`** (`src/services/importPlan.js`) que a gravação executa.
 4. **Prévia aberta** com as seções abaixo; os botões são **Cancelar** e **Confirmar atualização**.
-5. **Confirmar atualização** abre um resumo final em modal (períodos novos, campos a completar, ajustes preservados, notas/indicadores, novas Regionais/diretores/unidades e pendências permitidas); só após “Sim, atualizar” roda `runImport` (fluxo aprovado, inalterado).
+5. **Confirmar atualização** abre um resumo final em modal (registros novos/reutilizados/reativados/arquivados/ignorados, períodos novos, campos a completar, divergências mantidas, ajustes preservados, notas/indicadores, novas Regionais/diretores/unidades e pendências permitidas); só após “Sim, atualizar” roda `runImport` (agora orientado pelo plano — §21).
 6. **Cancelar** fecha a prévia sem enviar arquivo, sem tocar no banco e sem afetar gráficos/indicadores.
 7. Durante o processamento a interface mostra os estágios: *Salvando arquivo → Atualizando períodos → Atualizando indicadores → Atualizando cadastros → Concluído* (o duplo clique é bloqueado pelo estado `busy`).
 
@@ -533,13 +539,15 @@ Depois que o usuário seleciona uma planilha em “Atualizar pela planilha”, o
 | Seção | Conteúdo |
 |---|---|
 | Resumo (topo) | nome do arquivo, período mais recente encontrado, total de períodos identificados, registros, **diretores válidos**, unidades e a **referência atual × nova referência** dos indicadores (sem data/hora de análise nem logs técnicos) |
+| **Registros (identidade Diretor + Unidade)** *(seção nova — §21)* | quantos registros serão **novos, reutilizados, reativados, arquivados e ignorados**, com listagem por nome (arquivados: “ausente da planilha; nada é apagado”; ignorados: linha sem diretor/unidade) |
 | **Novos períodos** | cada período que ainda não existe no sistema, com contagem de registros com Status, com Nível e sem preenchimento (“Nenhum período novo encontrado.” quando não houver; nenhum período futuro é inventado) |
 | **Informações que serão completadas** | só períodos **já existentes** cujo campo está **vazio no sistema** e passou a ter valor na planilha (diretor · unidade · período · campo: “Não informado → novo valor”). Status e Nível são tratados separadamente e um campo já preenchido nunca é substituído |
+| **Divergências entre planilha e sistema** *(seção nova — §21)* | toda diferença (período, situação atual ou indicador) com os dois valores e a ação real: **atualizado** (o que muda) ou **mantido** (o que a prioridade preserva), com a origem (ajuste manual, valor importado, linha repetida etc.) |
 | **Dados existentes preservados** | períodos que não serão regravados, registros preservados e ajustes manuais intactos (detalhe dos rótulos sob “Ver detalhes”, sem listar célula a célula) |
 | **Ajustes manuais preservados** | frase fixa “Ajustes realizados no sistema têm prioridade e não serão substituídos pela planilha.”; nos detalhes: diretor, período, valor original importado e valor vigente ajustado |
 | **Notas e indicadores** | quantidade de registros com atualização, referência mais recente encontrada e indicadores reconhecidos (Presencial, Acadêmico, Pós-graduação, Nota geral, Ritmo de captação, Crescimento de matrículas, Evasão, Avaliação institucional, EBITDA) — os valores por diretor ficam só em “Ver detalhes” e nunca se misturam com o histórico mensal de Status/Nível |
 | **Novos cadastros e vínculos** | Regionais novas, diretores novos, unidades novas, diretores existentes, mudanças de Regional, mudanças de Unidade e registros sem diretor (nomes novos listados quando a quantidade é pequena; depois da confirmação os filtros são recarregados sem reiniciar o sistema) |
-| **Pendências e alertas** | somente quando necessário: linha sem diretor, período sem Status e Nível, coluna opcional não reconhecida, duplicidade inconsistente, unidade ausente, indicador inválido, Status não reconhecido, Nível fora de I–V, arquivo idêntico, período aparentemente retroativo, conflito com ajuste manual |
+| **Pendências e alertas** | somente quando necessário: linha sem diretor (agora **ignorada**, §21), período sem Status e Nível, coluna opcional não reconhecida, duplicidade inconsistente, unidade ausente, indicador inválido, Status não reconhecido, Nível fora de I–V, **arquivo idêntico no mesmo período (bloqueia)**, arquivo idêntico em outro período (aviso), período aparentemente retroativo, conflito com ajuste manual, divergências mantidas |
 
 ### 18.3 Diferenças fundamentais (período novo × campo vazio × preservado)
 
@@ -553,7 +561,7 @@ A regra já existente é mantida e agora fica **visível na prévia**: *ajuste m
 
 ### 18.5 Arquivo idêntico
 
-O hash SHA-256 passa a ser calculado **antes** da confirmação: se o arquivo for binariamente idêntico a uma avaliação já importada (com status diferente de `erro`), a prévia exibe “Este mesmo arquivo já foi importado anteriormente.” e **impede** a atualização. Uma nova versão legítima que repete o histórico e acrescenta um mês novo tem hash diferente e segue normalmente.
+O hash SHA-256 passa a ser calculado **antes** da confirmação: se o arquivo for binariamente idêntico a uma avaliação já importada (com status diferente de `erro`) **no mesmo ano/trimestre**, a prévia exibe “Este mesmo arquivo já foi importado neste período.” e **impede** a atualização; idêntico em **outro** período é apenas aviso (“as avaliações anteriores permanecem intactas”). Uma nova versão legítima que repete o histórico e acrescenta um mês novo tem hash diferente e segue normalmente.
 
 ### 18.6 Referência dinâmica dos indicadores e novos cadastros
 
@@ -612,3 +620,145 @@ O botão **Atualizar dados** da Matriz histórica (visível apenas com um direto
 - "Nota geral" vem **direto da coluna `GERAL`** da planilha (o parser não calcula): o sistema não inventa fórmula nova.
 - Conversões conferidas com os dados reais do banco: percentuais guardados como fração (ex.: Evasão média 0.1378 → 13,8%), notas numa escala observada de ~1,7 a ~5,4 (por isso sem faixa fixa de validação).
 - `npm run build` OK (`dist/assets/index-3eQUZHRT.js` 906,12 kB; apenas o aviso pré-existente de tamanho de chunk).
+
+---
+
+## 20. Limpeza dos dados operacionais para nova importação (2026-10-20)
+
+Apagou-se **exclusivamente o conteúdo operacional** do módulo Avaliação de Diretores (testes, importações anteriores, duplicidades e cadastros manuais), deixando o módulo **vazio** para receber novamente a planilha completa correta. **Nenhuma estrutura foi alterada.**
+
+### 20.1 Cópia de segurança técnica (pré-limpeza)
+
+- Pasta local **`backup-limpeza-2026-10-20/`** (na raiz do projeto, fora do Git): um `.json` por tabela + cópias binárias dos 2 arquivos XLSX do bucket + `resumo-backup.json` (data, contagens, caminhos e tamanhos).
+- **Sem credenciais** no backup (nenhuma chave, token ou senha; somente dados do módulo e nomes de arquivos).
+- Os scripts temporários usados na cópia e na limpeza (`scripts/backup-limpeza.mjs` e `scripts/limpar-storage.mjs`) foram **removidos** ao final — nenhum arquivo novo permanece no repositório.
+
+### 20.2 Tabelas limpas (todas do módulo) — linhas removidas
+
+| Tabela | Linhas removidas | Estado final |
+| --- | ---: | --- |
+| `avaliacoes_diretores` (avaliações importadas) | 2 | 0 |
+| `avaliacoes_diretores_registros` (diretores/unidades) | 122 | 0 |
+| `avaliacoes_diretores_periodos` (períodos históricos) | 1.952 | 0 |
+| `avaliacoes_diretores_indicadores` (indicadores importados) | 1.080 | 0 |
+| `avaliacoes_diretores_ajustes` (ajustes manuais de teste) | 6 | 0 |
+| `avaliacoes_diretores_indicadores_ajustes` | 0 (já vazia) | 0 |
+| `avaliacoes_diretores_observacoes` (pareceres/justificativas) | 16 | 0 |
+| **Total** | **3.178** | **0** |
+
+Exclusão na ordem correta (filhos → pais: ajustes, indicadores e observações → períodos e indicadores → registros → avaliações). Como **todas** as linhas foram removidas, **não resta nenhuma duplicidade** criada pelas importações anteriores (contagens por combinação de `avaliacao_id`/`registro_id`/`rotulo_periodo` = 0).
+
+### 20.3 Arquivos removidos do Storage (bucket `avaliacoes-diretores-planilhas`)
+
+| Caminho removido | Tamanho |
+| --- | ---: |
+| `avaliacoes/2026/3/96564c52-e74d-4ca0-a682-e4aa7ec3cf26/1792527522609-3tri-2026-status-diretores-unidades-vs-3-1.xlsx` | 77.164 B |
+| `avaliacoes/2026/3/cdb34a20-cdc6-416f-80f2-f70a2e8cc347/1791919005059-3tri-2026-status-diretores-unidades-vs-3.xlsx` | 78.744 B |
+
+- Remoção feita **pela Storage API** (2 arquivos, 155.908 B), com uma política `DELETE` temporária criada apenas para a operação e **imediatamente removida** (verificado: 0 políticas temporárias depois) — **nenhuma política RLS permanece alterada**.
+- **Bucket não foi excluído**; a listagem do bucket retorna **0 objetos**.
+
+### 20.4 Estruturas preservadas (verificado por consulta ao banco)
+
+| Item | Verificação |
+| --- | --- |
+| Tabelas (`public`) | 7 — todas mantidas, com colunas, `CHECK`, `DEFAULT` e `FK` intactos |
+| RLS | habilitada nas 7 tabelas; **34 políticas** (públicas + storage) sem qualquer alteração permanente |
+| Índices e `UNIQUE`/`CHECK` | preservados (nenhum `DROP`/`ALTER`) |
+| Triggers | 10 (inclui `updated_at` do módulo e `protect_*` do storage) — intactos |
+| Funções | 1 em `public` + funções do `storage` — intactas |
+| Migrations | 8 registradas em `supabase_migrations` + arquivos em `supabase/migrations/` intocados |
+| Bucket | presente, com limite de 15 MB e allowlist de MIME originais |
+| Auth/usuários | `auth.users` intocado |
+| Código, layout, assets, variáveis de ambiente, configurações | intocados (nenhum arquivo de `src/`, `public/`, `tests/` modificado) |
+| Demais módulos do banco | nenhum objeto fora do módulo foi acessado ou alterado |
+
+### 20.5 Estado final verificado (2026-10-20)
+
+- **Zero** avaliações · **zero** registros (diretores/unidades) · **zero** períodos · **zero** indicadores · **zero** ajustes manuais (período e indicadores) · **zero** pareceres/observações · **zero** objetos no bucket · **zero** duplicidades.
+- Tela em **estado vazio informativo** ("zero avaliações publicadas") com o **botão de upload / "Atualizar pela planilha" disponível** — comportamento já previsto no `App.jsx` quando não há avaliação publicada; **nenhuma alteração de layout ou funcionalidade** foi feita.
+- **`npm run build` ✅** (`dist/` gerada; apenas o aviso pré-existente de chunks maiores que 500 kB).
+- **Não executado:** `git add`, `commit`, `push`, atualização do GitHub, acesso/deploy na Vercel e mudança de variáveis de ambiente.
+
+### 20.6 Próximo passo
+
+**Importar a planilha completa correta** pelo fluxo "Atualizar pela planilha" (upload → prévia → confirmação), recriando do zero avaliação, registros, períodos e indicadores.
+
+---
+
+## 21. Regra definitiva de importação da Planilha1 — identidade, entidade e prioridades (2026-10-20)
+
+Esta seção é a **fonte canônica** da regra que vale a partir do primeiro upload pós-limpeza (§20). Implementação única: `src/services/importPlan.js` (função pura `planejarAtualizacao`), consumida **tanto pela prévia** (`buildUpdatePreview` em `previewService.js`) **quanto pela gravação** (`runImport` em `importService.js` sobre leitura fresca `carregarBaseImportacao()`); a tela nunca promete algo diferente do que será escrito. Bancariamente, a migration `20261020150000_avaliacoes_diretores_importacao_entidade.sql` (coluna `arquivado_em`, grants por coluna, políticas UPDATE e triggers de invariantes) sustenta a mesma regra como defesa em profundidade.
+
+### 21.1 Regra de identidade
+
+- A chave de um registro é **(Diretor + Unidade) normalizados** — `chaveVinculo(d, u) = nameKey(d)|nameKey(u)` (espaços/quebras colapsados, caixa e acentos ignorados). **Nunca** `avaliacao_id`, número de linha, posição de coluna ou ordem de aparição.
+- Linha **sem diretor** (ou **sem unidade**) é **IGNORADA** — não vira registro nem período; aparece na prévia como “Ignorada” e nas pendências.
+- Períodos são identificados por mês/ano real (`chavePeriodo`, ex.: “SET/3TRI 2026” → `M:2026-09`); indicadores, por nome normalizado (com fallback pelo nome amigável).
+
+### 21.2 Regra de arquivamento/reativação (registro = entidade)
+
+| Situação da dupla na planilha | Ação |
+|---|---|
+| dupla já **ativa** no sistema | **REUTILIZA** o mesmo registro (mesmo `id`, histórico e ajustes; `avaliacao_id` permanece o da criação) |
+| dupla **arquivada** que volta à planilha | **REATIVA** (`arquivado_em = null`) |
+| dupla **ativa** ausente da planilha | **ARQUIVA** (`arquivado_em = agora`) — lógico, **nada é apagado**, a linha some dos dashboards |
+| dupla **inexistente** | cria registro **NOVO** com o `avaliacao_id` desta importação |
+
+- `avaliacao_id` é **atribuição de criação imutável** (trigger no banco); mudanças de situação (regional, código, status de gestão, ciclo de vida, nível atual) só entram quando o valor da planilha está **presente e diferente**.
+- A base de comparação são as avaliações **`publicada`** (mesmo recorte dos dashboards); resíduos de importação `erro` ficam fora e nunca participam do vínculo. Nenhum `DELETE` existe no fluxo.
+
+### 21.3 Prioridade de escrita (o que a planilha pode tocar)
+
+Ordem de vigência: **1) ajuste manual > 2) cadastro manual > 3) valor importado > 4) nova planilha**. A planilha só escreve em:
+
+1. **período NOVO** do registro (inserção com ordem cronológica — mesma regra do cadastro manual: vizinhos sem ano preservados, só a coluna `ordem` muda);
+2. **campo VAZIO** de período existente (completar `estagio`/`nivel`; marcadores como “Não informado”/“-”/“n/d” contam como vazio — mesma semântica da trigger `avaliacoes_diretores_valor_vazio`);
+3. **indicadores/notas** do registro existente → atualiza `valor_numerico`/`valor_texto` (**exceto** quando há ajuste manual ativo daquele campo — a prioridade manual vence e a diferença vira divergência mantida);
+4. **situação atual** do registro (apenas valor presente e diferente);
+5. **arquivamento/reativação** conforme §21.2 (dupla ausente/arquivada), independentemente de a planilha trazer o campo ou não.
+
+Valor de período **já preenchido nunca é substituído**: a diferença aparece na prévia como **DIVERGÊNCIA mantida**.
+
+### 21.4 Regra de divergências
+
+Toda diferença planilha × sistema é listada com: registro (diretor · unidade), campo, valor do sistema, valor da planilha, **origem** (ajuste manual, valor importado, linha repetida na planilha, situação/planilha) e **ação**:
+
+- `atualizado` — o que **muda** no banco (completar, indicador novo/alterado sem ajuste, situação atual, arquivar/reativar);
+- `mantido` — o que a **prioridade preserva** (ajuste manual, valor já preenchido, cadastro manual).
+
+A prévia informa a contagem de cada ação e as pendências derivadas (conflito com ajuste manual; divergências mantidas).
+
+### 21.5 Prévia × execução (fonte única)
+
+- **Prévia**: `buildUpdatePreview` chama `planejarAtualizacao({ base: baseDoModelo(model), analysis, meta })` — sem rede/banco.
+- **Execução**: `runImport` → `carregarBaseImportacao()` (leitura fresca) → `planejarAtualizacao({ base, analysis, avaliacaoId })` → gravação por estágio (registros → períodos → indicadores → cadastros/situação → publicar).
+- Estágios: *validando → salvando arquivo → salvando dados → atualizando períodos → atualizando indicadores → atualizando cadastros → concluído*; falha marca a avaliação `erro` com o estágio.
+
+### 21.6 Arquivos alterados
+
+| Arquivo | Mudança |
+|---|---|
+| `src/services/importPlan.js` | **novo** — fonte única da regra (`planejarAtualizacao`, `chaveVinculo`, `chavePeriodo`, `statusLido`/`nivelLido`, `baseDoModelo`) |
+| `src/services/previewService.js` | prévia reconstruída sobre o plano (seções **Registros** e **Divergências**, bloqueio de arquivo idêntico por período, pendências de ignoradas/arquivados) |
+| `src/services/importService.js` | `runImport` passa a executar o **plano** (inserções + atualizações verificadas) em vez de inserção cega de snapshots |
+| `src/services/avaliacoesService.js` | `carregarBaseImportacao`, `updatePeriodo`, `updateIndicador`, `updateRegistrosEmLote` (agrupamento por patch + checagem de linhas retornadas/RLS) |
+| `src/services/dashboardService.js` | `buildDashboardModel` expõe `registrosArquivados`, `registros` ativos, registros com `arquivado` e indicadores com `id` |
+| `src/components/ImportDialog.jsx` | seções novas na prévia, resumo de confirmação e tela de sucesso com os totais reais do plano |
+| `src/App.jsx` | KPI/perfil “avaliações” = total publicado (registros são entidades reutilizadas — `avaliacao_id` não indica participação); “último período” usa a seleção atual |
+| `supabase/migrations/20261020150000_avaliacoes_diretores_importacao_entidade.sql` | **aplicada em 2026-10-20 via MCP do Supabase** — `arquivado_em`, grants UPDATE por coluna, políticas UPDATE (registros/indicadores/**periodos**), triggers de invariantes |
+| `tests/integration/fakeSupabase.mjs` | emulação de `.is(col, null)` (usado pela leitura fresca e pelos ajustes) |
+| `docs/MODELO_DADOS_AVALIACOES_DIRETORES.md` | §2.2–§2.4 e §5.2 atualizados com a coluna/políticas/triggers |
+
+### 21.7 Pendências antes do primeiro upload
+
+1. ~~**Aplicar a migration** `20261020150000_avaliacoes_diretores_importacao_entidade.sql`~~ — **APLICADA em 2026-10-20 via MCP do Supabase** (ver §21.8). Coluna + grants + políticas + triggers ativos no projeto conectado.
+2. **Primeiro upload real** pelo fluxo “Atualizar pela planilha”: com o banco vazio (§20), a primeira importação cria tudo como **registros novos**; a partir da segunda planilha valem reutilização, arquivamento/reativação, completar vazio e divergências (§21.2–§21.4).
+
+### 21.8 Correção de incidente (2026-10-20) — dashboard não carregava
+
+- **Causa confirmada:** o console reportava `column avaliacoes_diretores_registros.arquivado_em does not exist` e as consultas ao Supabase retornavam HTTP 400. A migration `20261020150000_avaliacoes_diretores_importacao_entidade.sql` existia localmente, mas **não tinha sido aplicada** ao projeto Supabase conectado — a coluna `arquivado_em` (`timestamptz null`) não existia na tabela `public.avaliacoes_diretores_registros`, embora `dashboardService.js` já a consultasse no `SELECT`.
+- **Correção:** a migration pendente foi aplicada diretamente no banco conectado **pelo MCP do Supabase** (sem migration duplicada). A migration é aditiva e idempotente (`ADD COLUMN IF NOT EXISTS`); cria a coluna, grants UPDATE por coluna para `anon`, políticas UPDATE (registros/indicadores/periodos) e triggers de invariantes.
+- **Preservação de dados:** nenhum registro foi apagado — os 61 registros existentes permanecem íntegros, todos com `arquivado_em = null` (nenhum arquivado automaticamente). Nenhuma outra tabela/módulo foi alterado.
+- **Verificações pós-aplicação (via MCP):** coluna `arquivado_em` existe com tipo `timestamptz`, aceita `null`; a consulta do dashboard (`SELECT ... arquivado_em ...`) retorna linhas sem HTTP 400; políticas RLS de SELECT para `anon`/`authenticated` permanecem ativas.
+- **Resultado:** o dashboard volta a carregar (Regionais, Diretores, Matriz Histórica, gráficos e indicadores), sem o erro de coluna no Console.

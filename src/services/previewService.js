@@ -1,22 +1,26 @@
-import { parseMonthHeader, nameKey, normName, isPresentName, distinctNames, regionalsOf, matrixPeriodColumns } from './dashboardService.js';
+import { nameKey, normName, isPresentName, distinctNames, regionalsOf, matrixPeriodColumns } from './dashboardService.js';
 import { opcoesStatus } from './ajustesService.js';
 import { romanLevel } from '../dataParser.js';
+import {
+  planejarAtualizacao, baseDoModelo, chavePeriodo, statusLido, nivelLido
+} from './importPlan.js';
 
 // ---------------------------------------------------------------------------
 // PRÉVIA DA ATUALIZAÇÃO PELA PLANILHA
 //
-// Comparação SOMENTE LEITURA entre a análise da nova planilha (em memória) e
-// o estado atual do sistema (modelo já carregado do banco). Nada é gravado,
-// enviado ao Storage ou alterado por esta camada — a prévia responde o que
-// ACONTECERÁ quando o usuário confirmar a atualização incremental:
-//   * períodos novos (que ainda não existem no sistema);
-//   * campos vazios que serão completados (só campo vazio, nunca substitui);
-//   * períodos existentes preservados (nenhuma linha atual é modificada);
-//   * ajustes manuais preservados (prioridade sobre valor repetido);
-//   * notas e indicadores que terão atualização na referência mais recente;
-//   * referência ATUAL e NOVA dos indicadores (dinâmica, nunca um mês fixo);
-//   * cadastros identificados (regionais/diretores/unidades novos ou existentes);
-//   * pendências e alertas simples.
+// Comparação SOMENTE LEITURA. O coração da prévia é `planejarAtualizacao`
+// (src/services/importPlan.js) — a MESMA função pura que a gravação executa
+// (runImport), só que aqui sobre o model em memória e sem tocar em rede/
+// banco. A tela, portanto, mostra exatamente o que acontecerá:
+//   * registros NOVOS, REUTILIZADOS, REATIVADOS e ARQUIVADOS (identidade
+//     Diretor+Unidade normalizada — nunca linha/posição/avaliação);
+//   * períodos novos e campos vazios que serão completados;
+//   * DIVERGÊNCIAS entre planilha e sistema com a ação de cada uma
+//     ("atualizado" = muda; "mantido" = a prioridade preserva);
+//   * prioridade manual intacta (ajuste manual > cadastro manual > valor
+//     importado > nova planilha);
+//   * referência DINÂMICA dos indicadores (nunca um mês fixo);
+//   * pendências e bloqueios (arquivo idêntico, linhas ignoradas etc.).
 // ---------------------------------------------------------------------------
 
 const ROMANOS = ['', 'I', 'II', 'III', 'IV', 'V'];
@@ -38,47 +42,17 @@ function nomeAmigavel(label){
   return String(label);
 }
 
-const eNaoInformado = v => /^n[ãa]o informad[oa]$/i.test(normName(v));
-
-// Marcador de célula vazia usada na planilha ("-", "—", "n/d"): não é valor.
-const eMarcador = v => /^[-—–]$/.test(normName(v)) || /^(n\/?d|s\/n|n\.d\.)$/i.test(normName(v));
-
-/** Status lido de um período: presente e diferente de "Não informado". */
-function statusLido(v){
-  const s = normName(v);
-  return s && !eNaoInformado(s) && !eMarcador(s) ? s : null;
-}
-
-/** Nível lido de um período: algarismo romano I–V ou texto presente. */
-function nivelLido(v){
-  const s = normName(v);
-  if(!s || eNaoInformado(s) || eMarcador(s)) return null;
-  return s;
-}
-
 function nivelPreenchido(periodo){
   if(periodo == null) return false;
   if(romanLevel(periodo.nivel) != null) return true;
   return nivelLido(periodo.nivel) != null;
 }
 
-function janelaAnos(avaliacoes){
-  const anos = (avaliacoes || []).map(a => Number(a?.ano)).filter(y => Number.isFinite(y));
-  if(!anos.length) return [2000, new Date().getFullYear() + 2];
-  return [Math.min(...anos) - 2, Math.max(...anos) + 2];
-}
-
-/**
- * Chave de identidade de um PERÍODO entre planilha e sistema: mês/ano real
- * ("SET/3TRI 2026" e "01/09/2026" → M:2026-09). Rótulo sem mês reconhecível
- * cai para comparação literal (nunca inventa período).
- */
-export function chavePeriodo(rotulo, janela){
-  const h = parseMonthHeader(rotulo, janela);
-  if(h.isMonth && h.month && h.year != null){
-    return `M:${h.year}-${String(h.month).padStart(2, '0')}`;
-  }
-  return `R:${normName(rotulo).toUpperCase()}`;
+/** Valor exibido em divergências (números formatados no pt-BR). */
+function valorExibido(v){
+  if(v == null || v === '') return '—';
+  if(typeof v === 'number') return v.toLocaleString('pt-BR', { maximumFractionDigits: 4 });
+  return normName(v) || '—';
 }
 
 /**
@@ -87,20 +61,27 @@ export function chavePeriodo(rotulo, janela){
  * (buildDashboardModel) + lista de avaliações com o MESMO hash (arquivo
  * binariamente idêntico, consulta apenas). Retorna objeto pronto para a UI.
  */
-export function buildUpdatePreview({ analysis, model, arquivosIguais = [] }){
+export function buildUpdatePreview({ analysis, model, arquivosIguais = [], meta = null }){
   const registros = model?.registros || [];
+  const registrosArquivados = model?.registrosArquivados || [];
+  const todosRegistros = [...registros, ...registrosArquivados];
   const avaliacoes = model?.avaliacoes || [];
-  const janela = janelaAnos(avaliacoes);
   const records = analysis?.records || [];
 
   // -------------------------------------------------------------------------
-  // Estado ATUAL do sistema: registro mais recente por diretor + unidade,
-  // conjunto de períodos já existentes e último mês já cadastrado.
+  // PLANO (fonte única da regra) — mesma função usada na gravação.
+  // -------------------------------------------------------------------------
+  const plano = planejarAtualizacao({ base: baseDoModelo(model), analysis });
+  const janela = plano.janela;
+  const resumo = plano.resumo;
+
+  // -------------------------------------------------------------------------
+  // Estado ATUAL do sistema por diretor/unidade (identidade normalizada).
   // -------------------------------------------------------------------------
   const ordemAval = new Map(avaliacoes.map((a, i) => [a.id, i]));
   const porChave = new Map();
   const porDiretor = new Map();
-  for(const r of registros){
+  for(const r of todosRegistros){
     const o = ordemAval.has(r.avaliacaoId) ? ordemAval.get(r.avaliacaoId) : -1;
     if(isPresentName(r.diretor)){
       const kd = nameKey(r.diretor);
@@ -115,7 +96,7 @@ export function buildUpdatePreview({ analysis, model, arquivosIguais = [] }){
   }
   const chavesExistentes = new Set();
   let ultimoMesExistente = null;
-  for(const r of registros){
+  for(const r of todosRegistros){
     for(const p of r.periodos ||[]){
       const k = chavePeriodo(p.rotulo, janela);
       chavesExistentes.add(k);
@@ -155,59 +136,70 @@ export function buildUpdatePreview({ analysis, model, arquivosIguais = [] }){
   const referencia = { atual: referenciaAtual || '—', nova: referenciaNova || '—', avanca };
 
   // -------------------------------------------------------------------------
-  // 1) Períodos NOVOS (não existem no sistema).
+  // 1) Registros da planilha: novos / reutilizados / reativados / arquivados
+  //    / ignorados (sem diretor ou sem unidade) — identidade Diretor+Unidade.
   // -------------------------------------------------------------------------
-  const novosPeriodos = chavesPlanilha
-    .filter(p => !chavesExistentes.has(p.chave))
-    .map(p => {
-      let comStatus = 0, comNivel = 0, semPreenchimento = 0;
-      for(const rec of records){
-        const h = (rec.history || []).find(x => x.period === p.label);
-        const s = h ? statusLido(h.stage) : null;
-        const n = h ? nivelLido(h.level) : null;
-        if(s) comStatus++;
-        if(n) comNivel++;
-        if(!s && !n) semPreenchimento++;
-      }
-      return { label: p.label, comStatus, comNivel, semPreenchimento };
-    });
+  const rotuloPessoa = (d, u) => `${normName(d) || '—'} · ${normName(u) || '—'}`;
+  const registrosPrev = {
+    novos: resumo.novos,
+    reutilizados: resumo.reutilizados,
+    reativados: resumo.reativados,
+    arquivados: resumo.arquivados,
+    ignoradas: resumo.ignoradas,
+    ignoradasSemDiretor: resumo.ignoradasSemDiretor,
+    ignoradasSemUnidade: resumo.ignoradasSemUnidade,
+    novosDetalhes: plano.novos.map(n => rotuloPessoa(n.diretor, n.unidade)),
+    reativadosDetalhes: plano.reativados.map(n => rotuloPessoa(n.diretor, n.unidade)),
+    arquivadosDetalhes: plano.arquivados.map(r => rotuloPessoa(r.diretor, r.unidade)),
+    ignoradasDetalhes: plano.ignoradas.map(i =>
+      `Linha ${i.linha} — ${rotuloPessoa(i.diretor, i.unidade)} (${i.motivo === 'sem-diretor' ? 'sem diretor' : 'sem unidade'})`)
+  };
 
   // -------------------------------------------------------------------------
-  // 2) Campos VAZIOS que serão completados (período já existente + sistema
-  //    com campo vazio + planilha com valor). Campo já preenchido nunca é
-  //    substituído; ajuste manual ativo tem prioridade e é pulado.
+  // 2) Períodos NOVOS que serão inseridos (agregados por rótulo).
   // -------------------------------------------------------------------------
-  const completacoes = [];
-  for(const rec of records){
-    if(!isPresentName(rec.director)) continue;
-    const atual = isPresentName(rec.unit)
-      ? porChave.get(`${nameKey(rec.director)}|${nameKey(rec.unit)}`)
-      : null;
-    if(!atual) continue; // diretor/unidade novo: não é "completar"
-    for(const h of rec.history ||[]){
-      const kp = chavePeriodo(h.period, janela);
-      if(!chavesExistentes.has(kp)) continue;
-      let alvo = null;
-      for(const p of atual.record.periodos ||[]){
-        if(chavePeriodo(p.rotulo, janela) === kp){ alvo = p; break; }
-      }
-      if(!alvo || alvo.ajustado) continue;
-      const novoStatus = statusLido(h.stage);
-      const novoNivel = nivelLido(h.level);
-      if(novoStatus && !statusLido(alvo.estagio)){
-        completacoes.push({ diretor: rec.director, unidade: rec.unit, periodo: h.period, campo: 'Status', valorNovo: novoStatus });
-      }
-      if(novoNivel && !nivelPreenchido(alvo)){
-        completacoes.push({ diretor: rec.director, unidade: rec.unit, periodo: h.period, campo: 'Nível', valorNovo: novoNivel });
-      }
-    }
+  const linhasNovasPeriodos = [
+    ...plano.periodos.insercoesNovos,
+    ...plano.periodos.insercoesExistentes.flatMap(i => i.rows)
+  ];
+  const porRotulo = new Map();
+  for(const row of linhasNovasPeriodos){
+    const ent = porRotulo.get(row.rotulo_periodo)
+      || { label: row.rotulo_periodo, comStatus: 0, comNivel: 0, semPreenchimento: 0, registros: 0 };
+    ent.registros++;
+    const s = statusLido(row.estagio);
+    const n = nivelLido(row.nivel);
+    if(s) ent.comStatus++;
+    if(n) ent.comNivel++;
+    if(!s && !n) ent.semPreenchimento++;
+    porRotulo.set(row.rotulo_periodo, ent);
   }
+  const ordemLabels = new Map((analysis?.periodLabels || []).map((l, i) => [l, i]));
+  const novosPeriodos = [...porRotulo.values()].sort((a, b) =>
+    (ordemLabels.get(a.label) ?? Number.MAX_SAFE_INTEGER) - (ordemLabels.get(b.label) ?? Number.MAX_SAFE_INTEGER));
 
   // -------------------------------------------------------------------------
-  // 3) Períodos existentes preservados (nenhuma linha atual é modificada).
+  // 3) Campos VAZIOS que serão completados (período existente + sistema com
+  //    campo vazio + planilha com valor). Nunca substitui valor preenchido.
+  // -------------------------------------------------------------------------
+  const completacoes = plano.periodos.completacoes;
+
+  // -------------------------------------------------------------------------
+  // 4) DIVERGÊNCIAS: toda diferença planilha × sistema com a ação real.
+  // -------------------------------------------------------------------------
+  const divergencias = plano.divergencias.map(d => ({
+    ...d,
+    valorSistemaExibido: valorExibido(d.valorSistema),
+    valorPlanilhaExibido: valorExibido(d.valorPlanilha)
+  }));
+  const divergenciasMantidas = divergencias.filter(d => d.acao === 'mantido');
+  const conflitosAjuste = divergencias.filter(d => d.origem === 'Ajuste manual').length;
+
+  // -------------------------------------------------------------------------
+  // 5) Períodos existentes preservados (nenhuma linha atual é modificada).
   // -------------------------------------------------------------------------
   const rotulosPreservados = new Map();
-  for(const r of registros){
+  for(const r of todosRegistros){
     for(const p of r.periodos ||[]){
       const k = chavePeriodo(p.rotulo, janela);
       if(!rotulosPreservados.has(k)) rotulosPreservados.set(k, normName(p.rotulo));
@@ -220,11 +212,10 @@ export function buildUpdatePreview({ analysis, model, arquivosIguais = [] }){
   };
 
   // -------------------------------------------------------------------------
-  // 4) Ajustes manuais preservados (prioridade sobre valor repetido).
+  // 6) Ajustes manuais preservados (prioridade sobre valor repetido).
   // -------------------------------------------------------------------------
   const ajustesDetalhes = [];
-  let conflitosAjuste = 0;
-  for(const r of registros){
+  for(const r of todosRegistros){
     for(const p of r.periodos ||[]){
       if(!p.ajustado) continue;
       ajustesDetalhes.push({
@@ -236,20 +227,12 @@ export function buildUpdatePreview({ analysis, model, arquivosIguais = [] }){
         statusVigente: normName(p.estagio) || '—',
         nivelVigente: normName(p.nivel) || '—'
       });
-      // Conflito: a nova planilha traz valor diferente do ajuste vigente.
-      const rec = records.find(x => isPresentName(x.director) && nameKey(x.director) === nameKey(r.diretor)
-        && nameKey(x.unit) === nameKey(r.unidade));
-      const h = rec && (rec.history || []).find(x => chavePeriodo(x.period, janela) === chavePeriodo(p.rotulo, janela));
-      if(h){
-        const s = statusLido(h.stage);
-        if(s && normName(s).toLocaleLowerCase('pt-BR') !== normName(p.estagio).toLocaleLowerCase('pt-BR')) conflitosAjuste++;
-      }
     }
   }
   const ajustesPreservados = { total: ajustesDetalhes.length, detalhes: ajustesDetalhes };
 
   // -------------------------------------------------------------------------
-  // 5) Notas e indicadores que serão atualizados (referência mais recente).
+  // 7) Notas e indicadores (referência mais recente) + o que muda de fato.
   // -------------------------------------------------------------------------
   const nomesReconhecidos = [...new Set(records.flatMap(r =>
     Object.entries(r.metrics || {}).filter(([, v]) => v != null).map(([n]) => n)))];
@@ -264,11 +247,16 @@ export function buildUpdatePreview({ analysis, model, arquivosIguais = [] }){
     totalRegistros: registrosIndicadores.length,
     referencia: periodoMaisRecente,
     nomes: nomesReconhecidos,
-    detalhes: indicadoresDetalhes
+    detalhes: indicadoresDetalhes,
+    atualizados: resumo.indicadoresAtualizados,
+    novos: resumo.indicadoresNovos,
+    registrosComMudanca: resumo.registrosComIndicadores,
+    preservadosPorAjuste: divergencias.filter(d => d.tipo === 'indicador' && d.origem === 'Ajuste manual')
+      .map(d => ({ diretor: d.diretor, unidade: d.unidade, campo: d.campo, valorSistema: valorExibido(d.valorSistema), valorPlanilha: valorExibido(d.valorPlanilha) }))
   };
 
   // -------------------------------------------------------------------------
-  // 6) Cadastros identificados (somente identificação — nada é re-vinculado).
+  // 8) Cadastros identificados (somente identificação — nada é re-vinculado).
   // -------------------------------------------------------------------------
   function diretorExisteNoSistema(d){
     // Mesmo diretor com unidade totalmente diferente continua "existente"
@@ -279,10 +267,10 @@ export function buildUpdatePreview({ analysis, model, arquivosIguais = [] }){
   const diretoresNovos = diretoresPlanilha.filter(d => !diretorExisteNoSistema(d));
   const diretoresExistentes = diretoresPlanilha.filter(diretorExisteNoSistema);
 
-  const regionaisNoSistema = new Set(regionalsOf(registros).map(nameKey));
+  const regionaisNoSistema = new Set(regionalsOf(todosRegistros).map(nameKey));
   const regionaisNovas = distinctNames(analysis?.regionals).filter(x => !regionaisNoSistema.has(nameKey(x)));
 
-  const unidadesNoSistema = new Set(registros.filter(r => isPresentName(r.unidade)).map(r => nameKey(r.unidade)));
+  const unidadesNoSistema = new Set(todosRegistros.filter(r => isPresentName(r.unidade)).map(r => nameKey(r.unidade)));
   const unidadesNovas = (analysis?.units || []).filter(isPresentName).filter(u => !unidadesNoSistema.has(nameKey(u)));
   const unidadesExistentes = (analysis?.units || []).filter(isPresentName).filter(u => unidadesNoSistema.has(nameKey(u)));
 
@@ -312,20 +300,35 @@ export function buildUpdatePreview({ analysis, model, arquivosIguais = [] }){
   };
 
   // -------------------------------------------------------------------------
-  // 7) Pendências e alertas (somente quando necessário; não bloqueiam salvo
+  // 9) Pendências e alertas (somente quando necessário; não bloqueiam salvo
   //    risco de corrupção — arquivo idêntico bloqueia na prévia).
   // -------------------------------------------------------------------------
   const pendencias = [];
-  const identico = (arquivosIguais || []).filter(a => a?.status !== 'erro');
-  if(identico.length > 0){
-    pendencias.push({ tipo: 'arquivo-identico', mensagem: 'Este mesmo arquivo já foi importado anteriormente.', bloqueia: true });
+  // Arquivo binariamente idêntico (hash): bloqueia quando já importado no
+  // MESMO período (runImport aplica a mesma regra via classifyHashDuplicates);
+  // em outro período é apenas aviso — a avaliação anterior permanece intacta.
+  const identico = (arquivosIguais || []).filter(a => a && a.status !== 'erro');
+  const mesmoPeriodo = meta
+    ? identico.filter(a => Number(a.ano) === Number(meta.ano) && Number(a.trimestre) === Number(meta.trimestre))
+    : identico;
+  const outroPeriodo = meta ? identico.filter(a => !mesmoPeriodo.includes(a)) : [];
+  if(mesmoPeriodo.length > 0){
+    pendencias.push({ tipo: 'arquivo-identico', mensagem: 'Este mesmo arquivo já foi importado neste período.', bloqueia: true });
   }
-  if(cadastros.semDiretor > 0){
-    pendencias.push({ tipo: 'sem-diretor', mensagem: `${cadastros.semDiretor} registro(s) está(ão) sem diretor informado.` });
+  if(outroPeriodo.length > 0){
+    pendencias.push({
+      tipo: 'arquivo-identico-outro',
+      mensagem: `Este mesmo arquivo já foi importado em ${outroPeriodo.map(d => `${d.trimestre}/${d.ano}`).join(', ')} — as avaliações anteriores permanecem intactas.`
+    });
   }
-  const semUnidade = records.filter(r => !isPresentName(r.unit)).length;
-  if(semUnidade > 0){
-    pendencias.push({ tipo: 'sem-unidade', mensagem: `${semUnidade} registro(s) está(ão) sem unidade informada.` });
+  if(resumo.ignoradasSemDiretor > 0){
+    pendencias.push({ tipo: 'sem-diretor', mensagem: `${resumo.ignoradasSemDiretor} linha(s) sem diretor serão IGNORADAS (não viram registro).` });
+  }
+  if(resumo.ignoradasSemUnidade > 0){
+    pendencias.push({ tipo: 'sem-unidade', mensagem: `${resumo.ignoradasSemUnidade} linha(s) sem unidade informada serão IGNORADAS (a identidade é Diretor + Unidade).` });
+  }
+  if(resumo.arquivados > 0){
+    pendencias.push({ tipo: 'arquivado', mensagem: `${resumo.arquivados} registro(s) existente(s) não está(ão) na planilha e serão ARQUIVADOS (nada é apagado).` });
   }
   let periodosVazios = 0;
   for(const rec of records){
@@ -348,7 +351,7 @@ export function buildUpdatePreview({ analysis, model, arquivosIguais = [] }){
   // Status/Nível que o sistema não sabe interpretar (Nível fora de I–V; Status
   // fora das opções conhecidas). Alerta simples, nunca bloqueia a atualização.
   const estagiosSistema = [];
-  for(const r of registros) for(const p of r.periodos || []){
+  for(const r of todosRegistros) for(const p of r.periodos || []){
     const s = normName(p.estagio);
     if(s) estagiosSistema.push(s);
   }
@@ -379,6 +382,10 @@ export function buildUpdatePreview({ analysis, model, arquivosIguais = [] }){
   if(conflitosAjuste > 0){
     pendencias.push({ tipo: 'conflito-ajuste', mensagem: `${conflitosAjuste} ajuste(s) manual(is) tem prioridade sobre valores repetidos na nova planilha.` });
   }
+  const mantidasSemAjuste = divergenciasMantidas.length - conflitosAjuste;
+  if(mantidasSemAjuste > 0){
+    pendencias.push({ tipo: 'divergencia', mensagem: `${mantidasSemAjuste} divergência(s) entre planilha e sistema serão MANTIDAS (a prioridade do sistema preserva o valor já existente).` });
+  }
 
   const bloqueado = pendencias.some(p => p.bloqueia) || !analysis?.ok;
 
@@ -391,8 +398,11 @@ export function buildUpdatePreview({ analysis, model, arquivosIguais = [] }){
     totalUnidades,
     totalPeriodosIdentificados,
     referencia,
+    registros: registrosPrev,
     novosPeriodos,
     completacoes,
+    divergencias,
+    divergenciasMantidas,
     periodosPreservados,
     ajustesPreservados,
     indicadores,
@@ -401,3 +411,5 @@ export function buildUpdatePreview({ analysis, model, arquivosIguais = [] }){
     bloqueado
   };
 }
+
+export { chavePeriodo };

@@ -1,4 +1,5 @@
 import { getSupabase } from './supabaseClient.js';
+import { loadPublishedDashboard, buildDashboardModel } from './dashboardService.js';
 
 const TABLE = 'avaliacoes_diretores';
 const REGISTROS = 'avaliacoes_diretores_registros';
@@ -105,4 +106,71 @@ export async function insertIndicadores(rows){
     fail(error, 'Falha ao inserir os indicadores');
   }
   return rows.length;
+}
+
+// ---------------------------------------------------------------------------
+// REGRA DEFINITIVA DE IMPORTAÇÃO — base fresca + gravação incremental
+// (identidade Diretor+Unidade; ver src/services/importPlan.js)
+// ---------------------------------------------------------------------------
+
+/**
+ * Estado ATUAL do sistema no formato do plano de importação: lido DIRETO do
+ * banco no momento da gravação (a prévia usa o model em memória pela mesma
+ * função pura). Somente avaliações publicadas — o mesmo recorte dos dashboards
+ * (resíduos de importações `erro` ficam fora e não participam do vínculo).
+ */
+export async function carregarBaseImportacao(){
+  const raw = await loadPublishedDashboard();
+  const model = buildDashboardModel(raw);
+  return {
+    avaliacoes: model.avaliacoes,
+    registros: model.registros,
+    registrosArquivados: model.registrosArquivados || [],
+    ajustesIndicadores: model.ajustesIndicadores
+  };
+}
+
+/**
+ * Atualiza UM período (completar estagio/nivel vazio ou ajustar `ordem`).
+ * A coluna-granted + trigger do banco garantem: valor já preenchido nunca é
+ * sobreescrito; rotulo_periodo/registro_id não mudam.
+ */
+export async function updatePeriodo(id, patch){
+  const { data, error } = await getSupabase().from(PERIODOS).update(patch).eq('id', id).select('id');
+  fail(error, 'Falha ao atualizar o período');
+  if(!data || data.length === 0){
+    throw new Error('Atualização do período negada pelas regras de acesso (RLS).');
+  }
+}
+
+/** Atualiza os valores importados de UM indicador (prioridade manual fica na camada de ajustes). */
+export async function updateIndicador(id, patch){
+  const { data, error } = await getSupabase().from(INDICADORES).update(patch).eq('id', id).select('id');
+  fail(error, 'Falha ao atualizar o indicador');
+  if(!data || data.length === 0){
+    throw new Error('Atualização do indicador negada pelas regras de acesso (RLS).');
+  }
+}
+
+/**
+ * Atualiza registros reutilizados/arquivados/reativados em LOTE: patches
+ * idênticos são agrupados em uma única requisição (`in`). Cada grupo confere
+ * a quantidade de linhas devolvidas — diferença = RLS negando.
+ */
+export async function updateRegistrosEmLote(patches){
+  const grupos = new Map();
+  for(const item of patches || []){
+    if(!item?.id || !item.patch) continue;
+    const chave = JSON.stringify(item.patch);
+    if(!grupos.has(chave)) grupos.set(chave, { patch: item.patch, ids: [] });
+    grupos.get(chave).ids.push(item.id);
+  }
+  for(const { patch, ids } of grupos.values()){
+    const { data, error } = await getSupabase().from(REGISTROS).update(patch).in('id', ids).select('id');
+    fail(error, 'Falha ao atualizar os registros');
+    if(!data || data.length !== ids.length){
+      throw new Error('Atualização de registros negada pelas regras de acesso (RLS).');
+    }
+  }
+  return patches?.length || 0;
 }

@@ -50,7 +50,11 @@ export default function ImportDialog({ file, analysis, model, arquivosIguais, on
 
   // Prévia SOMENTE LEITURA montada a partir da análise local + modelo atual.
   // Nenhum dado é gravado nem arquivo enviado enquanto o usuário não confirmar.
-  const prev = useMemo(() => buildUpdatePreview({ analysis, model, arquivosIguais }), [analysis, model, arquivosIguais]);
+  // A regra exibida é a MESMA função pura (planejarAtualizacao) que a gravação
+  // executa — meta acompanha título/trimestre/ano para o bloqueio de arquivo
+  // idêntico no MESMO período.
+  const meta = useMemo(() => ({ ano: Number(ano), trimestre: Number(trimestre) }), [ano, trimestre]);
+  const prev = useMemo(() => buildUpdatePreview({ analysis, model, arquivosIguais, meta }), [analysis, model, arquivosIguais, meta]);
   const pendenciasPermitidas = prev.pendencias.filter(p => !p.bloqueia);
   const podeConfirmar = !busy && !prev.bloqueado && Boolean(titulo.trim()) && analysis.missingRequired.length === 0;
 
@@ -73,16 +77,21 @@ export default function ImportDialog({ file, analysis, model, arquivosIguais, on
   }
 
   if(result){
+    const res = result.plano || {};
     return <div className="modal-backdrop"><div className="modal-card">
       <h2>Atualização concluída com sucesso</h2>
       <p className="modal-file" title={result.arquivoNome}>{result.titulo} · {result.trimestre}º trimestre / {result.ano} · {result.arquivoNome}</p>
       <div className="preview-grid">
-        <div><span>Períodos adicionados</span><b>{prev.novosPeriodos.length}</b></div>
-        <div><span>Campos completados</span><b>{prev.completacoes.length}</b></div>
-        <div><span>Indicadores atualizados</span><b>{prev.indicadores.totalRegistros}</b></div>
+        <div><span>Registros novos</span><b>{res.novos ?? 0}</b></div>
+        <div><span>Registros reutilizados</span><b>{res.reutilizados ?? 0}</b></div>
+        <div><span>Registros reativados</span><b>{res.reativados ?? 0}</b></div>
+        <div><span>Registros arquivados</span><b>{res.arquivados ?? 0}</b></div>
+        <div><span>Períodos adicionados</span><b>{res.periodosNovos ?? 0}</b></div>
+        <div><span>Campos completados</span><b>{res.completacoes ?? 0}</b></div>
+        <div><span>Indicadores atualizados</span><b>{(res.indicadoresAtualizados ?? 0) + (res.indicadoresNovos ?? 0)}</b></div>
+        <div><span>Divergências mantidas</span><b>{res.divergenciasMantidas ?? 0}</b></div>
         <div><span>Ajustes manuais preservados</span><b>{prev.ajustesPreservados.total}</b></div>
-        <div><span>Novos cadastros</span><b>{prev.cadastros.regionaisNovas.length + prev.cadastros.diretoresNovos.length + prev.cadastros.unidadesNovas.length}</b></div>
-        <div><span>Períodos preservados</span><b>{prev.periodosPreservados.total}</b></div>
+        <div><span>Registros ignorados</span><b>{res.ignoradas ?? 0}</b></div>
         <div><span>Pendências mantidas</span><b>{pendenciasPermitidas.length}</b></div>
       </div>
       {result.duplicateInOtherPeriod?.length > 0 &&
@@ -109,6 +118,18 @@ export default function ImportDialog({ file, analysis, model, arquivosIguais, on
         <p className="pv-nota">Nada será gravado até você confirmar a atualização.</p>
       </section>
 
+      <SecaoPrev titulo="Registros (identidade Diretor + Unidade)"
+        alerta={prev.registros.arquivados>0||prev.registros.ignoradas>0}
+        resumo={`${prev.registros.novos} novo(s) · ${prev.registros.reutilizados} reutilizado(s) · ${prev.registros.reativados} reativado(s) · ${prev.registros.arquivados} arquivado(s) · ${prev.registros.ignoradas} ignorada(s)`}
+        vazio="Nenhum registro identificado na planilha."
+        detalhes={(prev.registros.novosDetalhes.length||prev.registros.reativadosDetalhes.length||prev.registros.arquivadosDetalhes.length||prev.registros.ignoradasDetalhes.length||prev.registros.reutilizados)?<>
+          {prev.registros.reutilizados>0&&<p className="pv-linha">{prev.registros.reutilizados} registro(s) já existe(m) e serão REUTILIZADOS — mesmo id, histórico e ajustes preservados.</p>}
+          {prev.registros.novosDetalhes.length>0&&<ul className="pv-lista">{prev.registros.novosDetalhes.map((d,i)=><li key={`n${i}`}><b>Novo</b><span>{d}</span></li>)}</ul>}
+          {prev.registros.reativadosDetalhes.length>0&&<ul className="pv-lista">{prev.registros.reativadosDetalhes.map((d,i)=><li key={`r${i}`}><b>Reativado</b><span>{d} — volta a aparecer (arquivamento removido)</span></li>)}</ul>}
+          {prev.registros.arquivadosDetalhes.length>0&&<ul className="pv-lista">{prev.registros.arquivadosDetalhes.map((d,i)=><li key={`a${i}`}><b>Arquivado</b><span>{d} — ausente da planilha; nada é apagado</span></li>)}</ul>}
+          {prev.registros.ignoradasDetalhes.length>0&&<ul className="pv-lista">{prev.registros.ignoradasDetalhes.map((d,i)=><li key={`i${i}`}><b>Ignorada</b><span>{d}</span></li>)}</ul>}
+        </>:null}/>
+
       <SecaoPrev titulo="Novos períodos"
         resumo={prev.novosPeriodos.length ? `${prev.novosPeriodos.length} período(s) novo(s) serão adicionados.` : ''}
         vazio="Nenhum período novo encontrado."
@@ -127,6 +148,20 @@ export default function ImportDialog({ file, analysis, model, arquivosIguais, on
             <b>{c.diretor}</b> · {c.unidade}
             <span>{c.periodo} — {c.campo}: Não informado → {c.valorNovo}</span>
           </li>)}
+        </ul> : null}/>
+
+      <SecaoPrev titulo="Divergências entre planilha e sistema"
+        alerta={prev.divergenciasMantidas.length>0}
+        resumo={prev.divergencias.length
+          ? `${prev.divergencias.length} divergência(s): ${prev.divergencias.filter(d=>d.acao==='atualizado').length} será(ão) atualizado(s) e ${prev.divergenciasMantidas.length} mantido(s) — a prioridade do sistema (ajuste manual > cadastro manual > valor importado) preserva o valor existente.`
+          : ''}
+        vazio="Nenhuma divergência: planilha e sistema estão alinhados."
+        detalhes={prev.divergencias.length ? <ul className="pv-lista">
+          {prev.divergencias.slice(0,200).map((d,i)=><li key={i}>
+            <b>{d.diretor}</b> · {d.unidade}
+            <span>{d.periodo?`${d.periodo} — `:''}{d.campo}: sistema {d.valorSistemaExibido} · planilha {d.valorPlanilhaExibido} · {d.acao==='atualizado'?'atualizado':'mantido'} ({d.origem})</span>
+          </li>)}
+          {prev.divergencias.length>200&&<li className="pv-linha">… e mais {prev.divergencias.length-200} divergência(s).</li>}
         </ul> : null}/>
 
       <SecaoPrev titulo="Dados existentes preservados"
@@ -221,8 +256,10 @@ export default function ImportDialog({ file, analysis, model, arquivosIguais, on
         titulo="Confirmar atualização?"
         mensagem="Somente depois da confirmação o sistema grava a nova avaliação e o arquivo completo."
         detalhe={[
+          `Registros: ${prev.registros.novos} novo(s), ${prev.registros.reutilizados} reutilizado(s), ${prev.registros.reativados} reativado(s), ${prev.registros.arquivados} arquivado(s), ${prev.registros.ignoradas} ignorada(s)`,
           `Períodos novos: ${prev.novosPeriodos.length}${prev.novosPeriodos.length?` (${prev.novosPeriodos.map(p=>p.label).join(', ')})`:''}`,
           `Campos vazios a completar: ${prev.completacoes.length}`,
+          `Divergências mantidas: ${prev.divergenciasMantidas.length} (prioridade do sistema)`,
           `Ajustes manuais preservados: ${prev.ajustesPreservados.total}`,
           `Notas e indicadores a atualizar: ${prev.indicadores.totalRegistros} registro(s)`,
           `Novos cadastros: ${prev.cadastros.regionaisNovas.length} regional(is), ${prev.cadastros.diretoresNovos.length} diretor(es), ${prev.cadastros.unidadesNovas.length} unidade(s)`,

@@ -70,8 +70,10 @@ export default function App(){
  const allRecords=model?.registros||[];
  const regionals=useMemo(()=>regionalsOf(allRecords),[model]);
  const directors=useMemo(()=>directorsOf(allRecords,regional),[model,regional]);
- const visible=useMemo(()=>allRecords.filter(r=>(!regional||r.regional===regional)&&(!director||r.diretor===director)),[model,regional,director]);
- const visibleAvaliacaoIds=useMemo(()=>{const s=new Set(visible.map(r=>r.avaliacaoId));return (model?.avaliacoes||[]).filter(a=>s.has(a.id));},[model,visible]);
+  const visible=useMemo(()=>allRecords.filter(r=>(!regional||r.regional===regional)&&(!director||r.diretor===director)),[model,regional,director]);
+  // Registros são ENTIDADES reutilizadas entre importações (avaliacao_id = da
+  // criação) — a contagem de "avaliações disponíveis" é sempre o total
+  // publicado, nunca derivado do avaliacao_id dos registros visíveis.
 
  // Evolução MENSAL: ANÁLISE INDIVIDUAL de um diretor. Só existe card quando
  // um diretor específico está selecionado (sem diretor = evolution null = card
@@ -161,8 +163,7 @@ export default function App(){
  // período na ordem cronológica dos dados (mesma regra da matriz). Título
  // dinâmico (ex.: "Indicadores de Setembro de 2026"); sem mês/ano fixo e
  // sem inventar mês que não esteja nos dados.
- const latestAvaliacaoId=model?.avaliacoes?.[model.avaliacoes.length-1]?.id||null;
- const refLabel=useMemo(()=>{if(!model)return null;const cols=matrixPeriodColumns(allRecords,model.avaliacoes);return cols.length?cols[cols.length-1]:null;},[model,allRecords]);
+  const refLabel=useMemo(()=>{if(!model)return null;const cols=matrixPeriodColumns(allRecords,model.avaliacoes);return cols.length?cols[cols.length-1]:null;},[model,allRecords]);
  const refNome=useMemo(()=>{
   const lab=refLabel;if(!lab)return null;
   const up=String(lab).toUpperCase();
@@ -170,10 +171,8 @@ export default function App(){
   const ano=up.match(/(20\d{2})/);
   if(mes&&ano){const nome=MESES_NOME[mes[1]];return `${nome.charAt(0).toUpperCase()+nome.slice(1)} de ${ano[1]}`;}
   return String(lab);
- },[refLabel]);
- // Último período da seleção = registros da seleção pertencentes à
- // avaliação mais recente (sem simular histórico não armazenado).
- const visibleLatest=useMemo(()=>latestAvaliacaoId?visible.filter(r=>r.avaliacaoId===latestAvaliacaoId):visible,[visible,latestAvaliacaoId]);
+  },[refLabel]);
+
 
  // Seleção da planilha: validação + análise LOCAIS (nada vai ao banco nem ao
  // Storage nesta etapa). O hash é calculado apenas para reconhecer, já na
@@ -201,16 +200,16 @@ export default function App(){
   // única configuração — mudam automaticamente ao confirmar a edição do Status.
   const evPaleta=evResumo?PALETAS_STATUS[paletaStatus(evResumo.status)]:null;
   const evEstilo=evPaleta?{'--ev-fundo':evPaleta.fundo,'--ev-borda':evPaleta.borda,'--ev-etq':evPaleta.etiqueta,'--ev-etq-texto':evPaleta.etiquetaTexto}:null;
- // Selo “1 avaliação disponível” / “X avaliações disponíveis” REMOVIDO do
- // cabeçalho (remoção somente visual: nenhuma avaliação apagada, nenhuma
- // consulta alterada). O espaço liberado abriga a nova área de pareceres,
- // logo abaixo da identificação do diretor e antes dos cards.
- return <div className="app">
+  // Selo “1 avaliação disponível” / “X avaliações disponíveis” REMOVIDO do
+  // cabeçalho (remoção somente visual: nenhuma avaliação apagada, nenhuma
+  // consulta alterada). Os cards de pareceres ocupam a área entre o último
+  // gráfico (Evolução mensal) e a Matriz histórica de desempenho.
+  return <div className="app">
   <aside className="sidebar"><div className="brand"><img className="brand-logo" src="/assets/logo-diretores.png" alt="SER Educacional — logo da Avaliação de Diretores"/><span className="brand-title">Avaliação de Diretores</span></div><div className="sub">Avaliação de desempenho dos diretores</div>
    <input ref={fileRef} hidden type="file" accept=".xlsx,.xls" onChange={upload}/><button className="upload" onClick={()=>fileRef.current.click()}><span>↑</span> Atualizar pela planilha</button>
    <label>Regional</label><select value={regional} onChange={e=>{setRegional(e.target.value);setDirector('')}} disabled={!model}><option value="">Todas as regionais</option>{regionals.map(x=><option key={x}>{x}</option>)}</select>
    <label>Diretor</label><select value={director} onChange={e=>setDirector(e.target.value)} disabled={!regional}><option value="">Todos os diretores</option>{directors.map(x=><option key={x}>{x}</option>)}</select>
-   <div className="profile"><b>{director||regional||'Todas as regionais'}</b><span>{visible.length} registro(s) · {countDistinctNames(visible,'diretor')} diretor(es) · {visibleAvaliacaoIds.length} avaliação(ões)</span></div>
+    <div className="profile"><b>{director||regional||'Todas as regionais'}</b><span>{visible.length} registro(s) · {countDistinctNames(visible,'diretor')} diretor(es) · {(model?.avaliacoes?.length)||0} avaliação(ões)</span></div>
    {message&&<div className="message">{message}</div>}
   </aside>
   <ErrorBoundary>
@@ -219,8 +218,7 @@ export default function App(){
    {!loading&&loadError&&<section className="empty-state"><h2>Não foi possível carregar as avaliações</h2><p>Tente novamente em instantes.</p><button className="save" onClick={reload}>Tentar novamente</button></section>}
    {!loading&&!loadError&&model&&model.avaliacoes.length===0&&<section className="empty-state"><h2>Nenhuma avaliação disponível ainda</h2><p>Use “Atualizar pela planilha” para importar um arquivo. As avaliações importadas ficam disponíveis automaticamente e permanecem após recarregar a página.</p></section>}
    {!loading&&!loadError&&model&&model.avaliacoes.length>0&&<>
-     <Pareceres regional={regional} diretor={director} registros={model.registros} avaliacoes={model.avaliacoes}/>
-     <section className="kpis">{[['Diretores',countDistinctNames(visible,'diretor')],['Unidades',countDistinctNames(visible,'unidade')],['Nota geral',fmt(avg(visible.map(r=>recordMetric(r,'Nota geral'))))],['Avaliações',visibleAvaliacaoIds.length]].map(([a,b])=><article key={a}><span>{a}</span><strong>{b}</strong></article>)}</section>
+      <section className="kpis">{[['Diretores',countDistinctNames(visible,'diretor')],['Unidades',countDistinctNames(visible,'unidade')],['Nota geral',fmt(avg(visible.map(r=>recordMetric(r,'Nota geral'))))],['Avaliações',model.avaliacoes.length]].map(([a,b])=><article key={a}><span>{a}</span><strong>{b}</strong></article>)}</section>
      <div className="stack">
        <section className="card">
         <div className="ind-head">
@@ -232,7 +230,7 @@ export default function App(){
         </div>
         <div className="metric-grid">{metrics.map(n=>{
          const txt=v=>v==null?'Não informado':fmt(v,n);
-         const vUlt=avg(visibleLatest.map(r=>recordMetric(r,n)));
+         const vUlt=avg(visible.map(r=>recordMetric(r,n)));
          const vSel=avg(visible.map(r=>recordMetric(r,n)));
          const vGeral=avg(allRecords.map(r=>recordMetric(r,n)));
          return <div className="metric" key={n}><span>{n}</span><strong>{txt(indConsolidado?vSel:vUlt)}</strong>{indConsolidado&&<small>Consolidado: {txt(vGeral)}</small>}</div>;
@@ -245,6 +243,9 @@ export default function App(){
           último período válido ocupa o canto superior direito do card, ao lado
           do título e dos textos — nunca dentro da área do gráfico. */}
       {evolution&&<section className="card evolution-card"><div className="ev-topo"><div className="ev-textos"><h2>Evolução mensal do nível de desenvolvimento</h2><p className="ev-sub">Progressão do diretor entre os níveis I e V ao longo dos meses avaliados.</p></div>{evResumo&&<div className="ev-resumo" style={evEstilo}><div className="ev-linha"><b>Período:</b> <span className="ev-valor">{evResumo.periodo||'Não informado'}</span></div><div className="ev-linha ev-linha-status"><b>Status:</b> <span className="ev-badge">{evResumo.status||'Não informado'}</span></div><div className="ev-linha"><b>Nível:</b> <span className="ev-nivel">{evResumo.nivel||'Não informado'}</span></div>{evResumo.ajustado&&<div className="ev-ajuste">Atualizado no sistema</div>}{evResumo.periodoId&&<button type="button" className="ev-editar" onClick={()=>{setEditorSucesso('');setEditorAberto(true);}}>Editar</button>}{editorSucesso&&<div className="ev-sucesso" role="status">{editorSucesso}</div>}</div>}</div><ErrorBoundary titulo="Não foi possível desenhar o gráfico de evolução"><div className="chart"><MonthlyEvolutionChart periods={evolution.periods} series={evolution.series}/></div></ErrorBoundary><div className="legend"><i className="sel"/>Período mensal<i className="quarter"/>Fechamento trimestral</div></section>}
+      {/* Pareceres (JUSTIFICATIVA + Parecer de Operações) entre o último
+          gráfico e a Matriz histórica — apenas mudança de posição na página. */}
+      <Pareceres regional={regional} diretor={director} registros={model.registros} avaliacoes={model.avaliacoes}/>
       <section className="card"><h2>Matriz histórica de desempenho</h2><p>Reprodução da planilha original: histórico por período, situação atual e indicadores.</p><PerformanceMatrix records={visible} allRecords={allRecords} avaliacoes={model.avaliacoes} podeAtualizarDados={!!director} onAtualizarDados={()=>setPeriodosAberto(true)}/></section>
     </div>
    </>}

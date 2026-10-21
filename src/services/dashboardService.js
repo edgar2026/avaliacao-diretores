@@ -62,7 +62,7 @@ export async function loadPublishedDashboard(){
   for(const lote of chunks(avaliacoes.map(a => a.id), AVALIACOES_POR_REQUISICAO)){
     const rows = await fetchAll(() => supabase
       .from(REG)
-      .select('id, avaliacao_id, codigo_regional, regional, diretor, unidade, status_gestao, ciclo_vida, nivel_atual, numero_linha_origem')
+      .select('id, avaliacao_id, codigo_regional, regional, diretor, unidade, status_gestao, ciclo_vida, nivel_atual, numero_linha_origem, arquivado_em')
       .in('avaliacao_id', lote)
       .order('avaliacao_id', { ascending: true })
       .order('numero_linha_origem', { ascending: true, nullsFirst: false }));
@@ -755,8 +755,12 @@ export function aplicarAjusteIndicadorNoModelo(model, ajustes){
 
 /**
  * Transforma o resultado cru do Supabase no modelo usado pelos dashboards.
- * Cada avaliação é uma fotografia independente: registros carregam
- * `avaliacaoId`/`avaliacaoLabel`, os períodos internos ficam aninhados.
+ * Cada registro é uma ENTIDADE (Diretor+Unidade) reutilizada entre
+ * importações: `avaliacaoId` é a atribuição da criação e os períodos novos da
+ * planilha entram no mesmo registro. Registros com `arquivado_em` saem do
+ * conjunto ativo e vão para `registrosArquivados` (prévia/reativação) — nada
+ * é apagado. Os períodos carregam o valor VIGENTE (ajuste manual por cima do
+ * importado) e os indicadores expõem `id` para atualização incremental.
  */
 export function buildDashboardModel(raw){
   const avaliacoesOrdenadas = [...(raw.avaliacoes || [])].sort((a, b) =>
@@ -793,6 +797,7 @@ export function buildDashboardModel(raw){
   const indicadoresPorRegistro = new Map();
   for(const i of raw.indicadores || []){
     (indicadoresPorRegistro.get(i.registro_id) || indicadoresPorRegistro.set(i.registro_id, []).get(i.registro_id)).push({
+      id: i.id,
       nome: i.nome_indicador,
       valorNumerico: i.valor_numerico == null ? null : Number(i.valor_numerico),
       valorTexto: i.valor_texto,
@@ -808,7 +813,7 @@ export function buildDashboardModel(raw){
   const ajustesIndicadores = (raw.ajustesIndicadores || []).filter(a => a && !a.arquivada_em);
   const ctxIndicadores = contextoDeAjustesIndicadores(raw.registros, avaliacoesOrdenadas, ajustesIndicadores);
 
-  const registros = (raw.registros || []).map(r => {
+  const registrosTodos = (raw.registros || []).map(r => {
     const indicadores = (indicadoresPorRegistro.get(r.id) || []).slice()
       .sort((x, y) => (x.ordem ?? 0) - (y.ordem ?? 0));
     const { metricas, metricasImportado, metricasInfo } = metricasDoRegistro(
@@ -827,6 +832,7 @@ export function buildDashboardModel(raw){
       cicloVida: r.ciclo_vida,
       nivelAtual: r.nivel_atual,
       nivelRoman: romanLevel(r.nivel_atual),
+      arquivado: !!r.arquivado_em,
       metricas,
       metricasImportado,
       metricasInfo,
@@ -834,6 +840,11 @@ export function buildDashboardModel(raw){
       periodos: (periodosPorRegistro.get(r.id) || []).slice().sort((x, y) => (x.ordem ?? 0) - (y.ordem ?? 0))
     };
   });
+
+  // Ativos alimentam os dashboards; arquivados ficam à parte para a prévia de
+  // importação detectar reativação (mesma entidade, não um registro novo).
+  const registros = registrosTodos.filter(r => !r.arquivado);
+  const registrosArquivados = registrosTodos.filter(r => r.arquivado);
 
   const registrosPorAvaliacao = new Map(avaliacoesOrdenadas.map(a => [a.id, []]));
   for(const r of registros){
@@ -858,7 +869,7 @@ export function buildDashboardModel(raw){
     };
   });
 
-  return { avaliacoes, registros, ajustesIndicadores };
+  return { avaliacoes, registros, registrosArquivados, ajustesIndicadores };
 }
 
 // ---------------------------------------------------------------------------
