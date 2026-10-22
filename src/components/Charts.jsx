@@ -194,13 +194,21 @@ export function MonthlyEvolutionChart({periods}){
        const tri=!!p.isQuarter;
        const px=x(i),py=y(st.ordem);
        const info=linhas(p,st);
-       // Nível do MESMO período em algarismo romano sobre o ponto (cor única
-       // azul-petróleo, nunca a do Status). Nível ausente = sem rótulo.
-       const rom=p.nivelRoman!=null?ROMANO[p.nivelRoman]:null;
-        return <g key={i}>
-         {rom&&<text className="val-nivel" x={px} y={py-(tri?30:21)} textAnchor="middle">{rom}</text>}
+        // Nível do MESMO período em DUAS linhas sobre o ponto: algarismo romano
+        // na primeira linha e a palavra "Nível" logo abaixo (ambas acima do
+        // marcador; cor azul-petróleo, nunca a do Status). Nível ausente = nenhum
+        // dos dois rótulos (nunca zero, nunca "Não informado" sobre o ponto).
+        const rom=p.nivelRoman!=null?ROMANO[p.nivelRoman]:null;
+        // Altura levemente alternada nos meses seguidos para o conjunto não
+        // encostar no rótulo vizinho, mantendo o deslocamento sobre o ponto.
+        const alt=tri?0:(i%2?4:0);
+        const yRom=py-(tri?32:28)-alt;
+        const yPal=py-(tri?20:16)-alt;
+         return <g key={i}>
+         {rom&&<text className="val-nivel" x={px} y={yRom} textAnchor="middle">{rom}</text>}
+         {rom&&<text className="val-nivel-word" x={px} y={yPal} textAnchor="middle">Nível</text>}
          {tri&&<circle className="dot-ring" cx={px} cy={py} r={12}/>}
-         <circle className="dot dot-status" cx={px} cy={py} r={tri?10:7.5} fill={st.cor} stroke={tri?'#0e2f3b':st.borda} strokeWidth={tri?3:2}/>
+         <circle className="dot dot-status" cx={px} cy={py} r={tri?10:7.5} fill={st.cor} style={{fill:st.cor}} stroke={tri?'#0e2f3b':st.borda} strokeWidth={tri?3:2}/>
         <circle className="dot-hit" cx={px} cy={py} r={tri?15:11}
          onMouseEnter={e=>abre(e,info)} onMouseMove={mexe} onMouseLeave={fecha}/>
        </g>;
