@@ -213,13 +213,23 @@ export function MonthlyEvolutionChart({periods}){
          onMouseEnter={e=>abre(e,info)} onMouseMove={mexe} onMouseLeave={fecha}/>
        </g>;
      })}
-    {labels.map((p,i)=><g key={p.label+i}>
-      <text className="x-label" x={x(i)} y={H-44} textAnchor="middle">{p.label}</text>
-    </g>)}
+    {/* Eixo X em DUAS linhas: MÊS acima e ANO abaixo, cada período com seu
+        próprio texto centralizado no ponto (nunca texto corrido nem ano com
+        dois dígitos). O valor armazenado do período permanece intacto. */}
+    {labels.map((p,i)=>{
+      const txt=String(p.label||'');
+      const corte=txt.indexOf('/');
+      const mes=corte>0?txt.slice(0,corte):txt;
+      const ano=corte>0?txt.slice(corte+1):'';
+      return <g key={p.label+i}>
+        <text className="x-label" x={x(i)} y={H-52} textAnchor="middle">{mes}</text>
+        {ano&&<text className="x-ano" x={x(i)} y={H-36} textAnchor="middle">{ano}</text>}
+      </g>;
+    })}
     {labels.map((p,i)=><g key={'tri-'+p.label+i}>
       {p.quarterLabel&&(triQuebra[i]
-        ? <text className="x-sub" x={x(i)} y={H-28} textAnchor="middle"><tspan x={x(i)} dy="0">{triQuebra[i][0]}</tspan>{triQuebra[i][1]&&<tspan x={x(i)} dy="12">{triQuebra[i][1]}</tspan>}</text>
-        : <text className="x-sub" x={x(i)} y={H-16} textAnchor="middle">{p.quarterLabel}</text>)}
+        ? <text className="x-sub" x={x(i)} y={H-23} textAnchor="middle"><tspan x={x(i)} dy="0">{triQuebra[i][0]}</tspan>{triQuebra[i][1]&&<tspan x={x(i)} dy="12">{triQuebra[i][1]}</tspan>}</text>
+        : <text className="x-sub" x={x(i)} y={H-19} textAnchor="middle">{p.quarterLabel}</text>)}
     </g>)}
    </svg></div>
    </div>

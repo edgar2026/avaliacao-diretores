@@ -271,7 +271,8 @@ header p{color:rgba(255,255,255,0.85)}
    única azul-petróleo (nunca a cor do Status). */
 .evolution-card .chart-svg .val-nivel{font-size:12px;font-weight:700;fill:#0B5F72}
 .evolution-card .chart-svg .val-nivel-word{font-size:9.5px;font-weight:600;fill:#087F95}
-.evolution-card .chart-svg .x-label{font-size:12px;font-weight:600;fill:#31505d}
+.evolution-card .chart-svg .x-label{font-size:12px;font-weight:700;fill:#31505d}
+.evolution-card .chart-svg .x-ano{font-size:10.5px;font-weight:600;fill:#5b7c88}
 .evolution-card .chart-svg .x-sub{font-size:11px;font-weight:600;fill:#41606d}
 .evolution-card .legend{display:flex;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:13.5px;font-weight:500;color:#41606d}
 .evolution-card .legend i{width:12px;height:12px}
@@ -391,7 +392,8 @@ header p{color:rgba(255,255,255,0.85)}
   .evolution-card .line-seg{stroke-width:4.5}
   .evolution-card .chart-svg .val-nivel{font-size:11px}
   .evolution-card .chart-svg .val-nivel-word{font-size:9px}
-  .evolution-card .chart-svg .x-label{font-size:10px;letter-spacing:-.03em}
+  .evolution-card .chart-svg .x-label{font-size:11px}
+  .evolution-card .chart-svg .x-ano{font-size:10px}
   .evolution-card .chart-svg .x-sub{font-size:10px}
   .ev-resumo{min-width:285px;max-width:315px}
 }
@@ -409,7 +411,8 @@ header p{color:rgba(255,255,255,0.85)}
   .evolution-card .line-seg{stroke-width:4}
   .evolution-card .chart-svg .val-nivel{font-size:11px}
   .evolution-card .chart-svg .val-nivel-word{font-size:9px}
-  .evolution-card .chart-svg .x-label{font-size:12px}
+  .evolution-card .chart-svg .x-label{font-size:10px}
+  .evolution-card .chart-svg .x-ano{font-size:9px}
   .evolution-card .chart-svg .x-sub{font-size:11px}
   .evolution-card .status-legend{font-size:11px}
   .ev-resumo{font-size:14px;gap:8px;padding:12px 14px}
