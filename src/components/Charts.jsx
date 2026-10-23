@@ -37,6 +37,34 @@ export function statusEvo(status){
  if(cfg)return cfg;
  return {chave:'nao-classificado',nome:'Não classificado',ordem:null,cor:'#94A3B8',texto:'#0F172A',borda:'#64748B'};
 }
+/**
+ * Único indicador mensal de mudança (UM por período, com prioridade):
+ *   1. Status mudou na hierarquia (STATUS_EVO)  -> status-up / status-down;
+ *   2. Status igual e Nível mudou (I=1 … V=5)   -> level-up  / level-down;
+ *   3. Status e Nível iguais                    -> unchanged;
+ *   4. Dados insuficientes (Status ou Nível
+ *      ausente/fora da escala em qualquer um
+ *      dos dois períodos)                       -> indeterminate.
+ * Aceita Status por chave/canônico (string) ou pela ordem hierárquica (número).
+ * Quando o Status muda, o Nível NUNCA gera indicador próprio (prioridade).
+ */
+export function getMonthlyChangeIndicator(statusAnterior,nivelAnterior,statusAtual,nivelAtual){
+ const ordemDe=s=>{
+  if(s==null||s==='')return null;
+  if(Number.isFinite(s))return s>=1&&s<=EVO_MAX?s:null;
+  const cfg=EVO_POR_CHAVE.get(normSt(s));
+  return cfg&&cfg.ordem!=null?cfg.ordem:null;
+ };
+ const oAnt=ordemDe(statusAnterior),oAt=ordemDe(statusAtual);
+ const nAnt=Number.isInteger(nivelAnterior)&&!!ROMANO[nivelAnterior]?nivelAnterior:null;
+ const nAt=Number.isInteger(nivelAtual)&&!!ROMANO[nivelAtual]?nivelAtual:null;
+ if(oAnt==null||oAt==null||nAnt==null||nAt==null)return 'indeterminate';
+ if(oAt>oAnt)return 'status-up';
+ if(oAt<oAnt)return 'status-down';
+ if(nAt>nAnt)return 'level-up';
+ if(nAt<nAnt)return 'level-down';
+ return 'unchanged';
+}
 const MESES_EXT=['JAN','FEV','MAR','ABR','MAI','JUN','JUL','AGO','SET','OUT','NOV','DEZ'];
 const MESES_LONGO=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 // "JUN/2026" -> "Junho de 2026" apenas para exibição no tooltip; o rótulo do
@@ -76,7 +104,10 @@ const MAX_VISIBLE_PERIODS_WITHOUT_SCROLL = 18;
 export function MonthlyEvolutionChart({periods}){
  const labels=periods||[];
  if(!labels.length)return <p className="chart-empty">Sem períodos para exibir</p>;
-  const PAD=36,T=40,B=76,MIN_GAP=96,YAXIS_W=136;
+  // T=52: zona de SEGURANÇA acima da linha de Delegação II (≈52px até o topo
+  // do SVG) para algarismo romano, palavra "Nível", indicador de mudança e
+  // anel trimestral sem corte — para QUALQUER diretor que alcance o topo.
+  const PAD=36,T=52,B=76,MIN_GAP=96,YAXIS_W=136;
  const scrollRef=React.useRef(null);
  const frameRef=React.useRef(null);
  const [availW,setAvailW]=React.useState(PAD*2+MIN_GAP*Math.max(0,labels.length-1));
@@ -114,8 +145,41 @@ export function MonthlyEvolutionChart({periods}){
  const x=i=>PAD+i*gap;
  // Escala do STATUS: 1 (Acompanhamento, base) .. EVO_MAX (Delegação II, topo).
  const y=v=>T+(EVO_MAX-v)*(H-T-B)/(EVO_MAX-1);
- // Status vigente de cada mês, resolvido UMA vez pela configuração única.
- const statusDe=labels.map(p=>statusEvo(p?.status));
+  // Status vigente de cada mês, resolvido UMA vez pela configuração única.
+  const statusDe=labels.map(p=>statusEvo(p?.status));
+  // Indicador de mudança (UM por mês, prioridade Status > Nível > Não alterou):
+  // compara com o último período anterior que possua Status hierarquizado E
+  // Nível válidos. Lacunas (sem Status ou sem Nível) não geram indicador nem
+  // valor artificial; após a lacuna, a comparação usa o último período válido
+  // completo anterior. Primeiro período válido = sem indicador.
+  const indicadores=[];
+  {
+   let ult=null; // {st, n} do último período com Status E Nível válidos
+   labels.forEach((p,i)=>{
+    const st=statusDe[i];
+    const temSt=!!(st&&st.ordem!=null);
+    const n=p?.nivelRoman;
+    const temNivel=Number.isInteger(n)&&!!ROMANO[n];
+    if(!temSt||!temNivel){indicadores[i]=null;return;}
+    let kind='indeterminate',deSt=null,paraSt=null,deN=null,paraN=null;
+    if(ult){
+     kind=getMonthlyChangeIndicator(ult.st.chave,ult.n,st.chave,n);
+     deSt=ult.st.nome;paraSt=st.nome;deN=ROMANO[ult.n];paraN=ROMANO[n];
+    }
+    indicadores[i]={kind,deSt,paraSt,deN,paraN};
+    ult={st,n};
+   });
+  }
+  // Símbolo de CADA indicador (nunca mais de um por mês). A COR vive SOMENTE
+  // no CSS (.val-nivel-seta.up/.down/.same → variáveis --evo-* compartilhadas
+  // com a legenda inferior) — aqui entra apenas a classe correspondente.
+  const SETA_IND={
+   'status-up':{s:'↑↑',classe:'up'},
+   'status-down':{s:'↓↓',classe:'down'},
+   'level-up':{s:'↑',classe:'up'},
+   'level-down':{s:'↓',classe:'down'},
+   'unchanged':{s:'↔',classe:'same'}
+  };
  // Segmentos: cada trecho liga dois Status válidos consecutivos e usa a cor
  // do Status do mês de DESTINO — a mudança fica evidente pelo encontro das
  // cores. Lacunas (sem Status) interrompem a linha; nada atravessa ausência.
@@ -145,14 +209,31 @@ export function MonthlyEvolutionChart({periods}){
    const corte=texto.lastIndexOf(' de ');
    triQuebra[i]=corte>0?[texto.slice(0,corte),texto.slice(corte+1)]:[texto];
  });
- const linhas=(p,st)=>{
-  const out=[periodoExtenso(p.label)];
-  // Tooltip mostra SEMPRE o Status completo (nunca número, nunca abreviação):
-  // hierarquia -> nome canônico; fora da escala -> "Não classificado";
-  // ausente -> "Não informado". O Nível vem EXATAMENTE do mesmo período.
-  out.push(`Status: ${st?st.nome:'Não informado'}`);
-  const n=p.nivelRoman;
-  out.push(`Nível de desenvolvimento: ${n!=null&&ROMANO[n]?ROMANO[n]:'Não informado'}`);
+  const linhas=(p,st,i)=>{
+   const out=[periodoExtenso(p.label)];
+   // Tooltip mostra SEMPRE o Status completo (nunca número, nunca abreviação):
+   // hierarquia -> nome canônico; fora da escala -> "Não classificado";
+   // ausente -> "Não informado". O Nível vem EXATAMENTE do mesmo período.
+   out.push(`Status: ${st?st.nome:'Não informado'}`);
+   const n=p.nivelRoman;
+   out.push(`Nível de desenvolvimento: ${n!=null&&ROMANO[n]?ROMANO[n]:'Não informado'}`);
+   // Indicador do mês (UM só resultado, mesma regra do gráfico):
+   //   Status mudou -> "Status: A → B" + "Resultado: Status subiu/desceu";
+   //   só Nível mudou -> "Nível: A → B" + "Resultado: Nível subiu/desceu";
+   //   nada mudou -> "Status e Nível permaneceram iguais" + "Resultado: Não alterou".
+   const ind=indicadores[i];
+   if(ind&&ind.kind!=='indeterminate'){
+    if(ind.kind==='status-up'||ind.kind==='status-down'){
+     out[1]=`Status: ${ind.deSt} → ${ind.paraSt}`;
+     out.push(`Resultado: ${ind.kind==='status-up'?'Status subiu':'Status desceu'}`);
+    }else if(ind.kind==='level-up'||ind.kind==='level-down'){
+     out.push(`Nível: ${ind.deN} → ${ind.paraN}`);
+     out.push(`Resultado: ${ind.kind==='level-up'?'Nível subiu':'Nível desceu'}`);
+    }else{
+     out.push('Status e Nível permaneceram iguais');
+     out.push('Resultado: Não alterou');
+    }
+   }
   // Ajuste manual: o valor VIGENTE acima difere do importado da planilha —
   // o original aparece para consulta/auditoria (sem justificativa).
   if(p.ajustado){
@@ -193,19 +274,26 @@ export function MonthlyEvolutionChart({periods}){
        if(!st||st.ordem==null)return null;
        const tri=!!p.isQuarter;
        const px=x(i),py=y(st.ordem);
-       const info=linhas(p,st);
-        // Nível do MESMO período em DUAS linhas sobre o ponto: algarismo romano
-        // na primeira linha e a palavra "Nível" logo abaixo (ambas acima do
-        // marcador; cor azul-petróleo, nunca a do Status). Nível ausente = nenhum
-        // dos dois rótulos (nunca zero, nunca "Não informado" sobre o ponto).
-        const rom=p.nivelRoman!=null?ROMANO[p.nivelRoman]:null;
-        // Altura levemente alternada nos meses seguidos para o conjunto não
-        // encostar no rótulo vizinho, mantendo o deslocamento sobre o ponto.
-        const alt=tri?0:(i%2?4:0);
-        const yRom=py-(tri?32:28)-alt;
-        const yPal=py-(tri?20:16)-alt;
+        const info=linhas(p,st,i);
+         // Nível do MESMO período em DUAS linhas sobre o ponto: algarismo romano
+         // na primeira linha e a palavra "Nível" logo abaixo (ambas acima do
+         // marcador; cor azul-petróleo, nunca a do Status). Nível ausente = nenhum
+         // dos dois rótulos (nunca zero, nunca "Não informado" sobre o ponto).
+         const rom=p.nivelRoman!=null?ROMANO[p.nivelRoman]:null;
+         // UM único indicador de mudança ao lado do algarismo romano (Status
+         // prioriza Nível; sem indicador = primeiro período ou lacuna). Somente
+         // o símbolo recebe a cor verde/vermelha/azul; numeral, palavra "Nível",
+         // ponto, linha e Status permanecem intactos.
+         const ind=indicadores[i];
+         const seta=ind?SETA_IND[ind.kind]:null;
+         // Altura levemente alternada nos meses seguidos para o conjunto não
+         // encostar no rótulo vizinho, mantendo o deslocamento sobre o ponto.
+         const alt=tri?0:(i%2?4:0);
+         const yRom=py-(tri?32:28)-alt;
+         const yPal=py-(tri?20:16)-alt;
          return <g key={i}>
          {rom&&<text className="val-nivel" x={px} y={yRom} textAnchor="middle">{rom}</text>}
+         {rom&&seta&&<text className={`val-nivel-seta ${seta.classe}`} x={px+rom.length*3.5+3} y={yRom} textAnchor="start">{seta.s}</text>}
          {rom&&<text className="val-nivel-word" x={px} y={yPal} textAnchor="middle">Nível</text>}
          {tri&&<circle className="dot-ring" cx={px} cy={py} r={12}/>}
          <circle className="dot dot-status" cx={px} cy={py} r={tri?10:7.5} fill={st.cor} style={{fill:st.cor}} stroke={tri?'#0e2f3b':st.borda} strokeWidth={tri?3:2}/>
@@ -240,12 +328,16 @@ export function MonthlyEvolutionChart({periods}){
   </div>;
 }
 
-// Legenda ULTRACOMPACTA: o Status já é explicado pelas etiquetas do eixo Y e
-// o Nível pelos algarismos romanos sobre os pontos — aqui restam só o anel de
-// fechamento trimestral e uma linha discreta de apoio (uma única linha).
+// Legenda dos CINCO indicadores de mudança (Status e Nível diferenciados) +
+// anel de fechamento trimestral. Uma única linha quando cabe; quebra
+// responsiva natural quando não cabe (flex-wrap).
 export function EvolutionLegend(){
  return <div className="status-legend" aria-hidden="true">
-   <span className="lg-nota">Algarismo romano sobre o ponto: Nível de desenvolvimento</span>
+   <span><b className="lg-seta lg-up">↑</b> Nível subiu</span>
+   <span><b className="lg-seta lg-down">↓</b> Nível desceu</span>
+   <span><b className="lg-seta lg-up">↑↑</b> Status subiu</span>
+   <span><b className="lg-seta lg-down">↓↓</b> Status desceu</span>
+   <span><b className="lg-seta lg-same">↔</b> Não alterou</span>
    <span><i className="lg-quarter"/>Fechamento trimestral</span>
  </div>;
 }

@@ -253,9 +253,21 @@ header p{color:rgba(255,255,255,0.85)}
 
 /* --- Evolução mensal do Status e do Nível (nomenclatura + legibilidade) ---
    Só afeta o card do gráfico de evolução (.evolution-card) e o tooltip dele. */
-.evolution-card{padding:18px 14px}
-.evolution-card h2{font-size:22px;font-weight:700;color:#0e2f3b;letter-spacing:.005em;margin:0 0 4px}
-.evolution-card .ev-sub{font-size:14px;font-weight:400;line-height:1.35;color:#4a626d;margin:0 0 4px;max-width:84ch}
+/* Cores ÚNICAS dos indicadores de mudança (legenda inferior = fonte oficial):
+   usadas tanto pela legenda (color) quanto pelos símbolos sobre os pontos
+   (fill) — um só lugar define verde/vermelho/azul, sem valores duplicados. */
+/* Padding superior/inferior compacto: a faixa de cabeçalho (título + Diretor +
+   Unidade + subcard) ocupa só o necessário e a área gráfica começa logo abaixo. */
+.evolution-card{padding:14px 14px;--evo-subiu:#15803D;--evo-desceu:#DC2626;--evo-igual:#0284C7}
+.evolution-card h2{font-size:22px;font-weight:700;color:#0e2f3b;letter-spacing:.005em;margin:0 0 2px}
+/* Diretor e Unidade do diretor selecionado, no lugar do antigo subtítulo:
+   duas linhas compactas, alinhadas à esquerda, azul-petróleo escura, sem
+   novo card e sem repetir a Regional. */
+.evolution-card .ev-diretor{display:flex;flex-direction:column;gap:1px;margin:0 0 2px}
+.evolution-card .ev-diretor-linha{font-size:14px;line-height:1.3;color:#0e2f3b}
+.evolution-card .ev-diretor-linha b{font-weight:700;color:#0e2f3b;letter-spacing:.01em}
+.evolution-card .ev-diretor-nome{font-size:15px;font-weight:600;color:#0e2f3b}
+.evolution-card .ev-diretor-unidade{font-size:13.5px;font-weight:500;color:#0e2f3b}
 .evolution-card .chart{height:350px}
 .evolution-card .chart-evo{display:flex;flex-direction:column;height:100%;min-height:0}
 .evolution-card .chart-evo .chart-frame{flex:1 1 auto;height:auto;min-height:0}
@@ -270,32 +282,51 @@ header p{color:rgba(255,255,255,0.85)}
 /* Nível em algarismo romano SOBRE cada ponto: sem fundo, sem caixa, cor
    única azul-petróleo (nunca a cor do Status). */
 .evolution-card .chart-svg .val-nivel{font-size:12px;font-weight:700;fill:#0B5F72}
+/* Indicador de MUDANÇA (UM por mês) ao lado do algarismo romano: mesmo
+   padrão visual da legenda inferior (mesmas cores via variáveis, peso 800,
+   opacidade 100%), tamanho compacto equivalente ao dos símbolos da legenda.
+   O fill EXPLÍCITO aqui anula o cinza herdados de ".chart-svg text". */
+.evolution-card .chart-svg .val-nivel-seta{font-size:17px;font-weight:800;opacity:1;letter-spacing:-.04em}
+.evolution-card .chart-svg .val-nivel-seta.up{fill:var(--evo-subiu)}
+.evolution-card .chart-svg .val-nivel-seta.down{fill:var(--evo-desceu)}
+.evolution-card .chart-svg .val-nivel-seta.same{fill:var(--evo-igual)}
 .evolution-card .chart-svg .val-nivel-word{font-size:9.5px;font-weight:600;fill:#087F95}
 .evolution-card .chart-svg .x-label{font-size:12px;font-weight:700;fill:#31505d}
 .evolution-card .chart-svg .x-ano{font-size:10.5px;font-weight:600;fill:#5b7c88}
 .evolution-card .chart-svg .x-sub{font-size:11px;font-weight:600;fill:#41606d}
 .evolution-card .legend{display:flex;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:13.5px;font-weight:500;color:#41606d}
 .evolution-card .legend i{width:12px;height:12px}
-/* Legenda inferior ULTRACOMPACTA: uma linha de apoio + anel trimestral
-   (Status vive no eixo Y; Nível vive nos algarismos sobre os pontos). */
-.evolution-card .status-legend{display:flex;align-items:center;flex-wrap:wrap;gap:4px 14px;margin-top:4px;font-size:11.5px;font-weight:600;color:#41606d}
-.evolution-card .status-legend span{display:inline-flex;align-items:center;gap:5px}
+/* Legenda dos CINCO indicadores de mudança (Status × Nível) + trimestre:
+   setas maiores e visíveis, verde/vermelho/azul fortes, fonte 13,5px peso 600,
+   quebra responsiva em duas linhas quando necessário (sem altura excessiva). */
+.evolution-card .status-legend{display:flex;align-items:center;flex-wrap:wrap;gap:5px 16px;margin-top:6px;font-size:13.5px;font-weight:600;color:#41606d}
+.evolution-card .status-legend span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
 .evolution-card .status-legend i{width:10px;height:10px;border-radius:3px}
-.evolution-card .status-legend .lg-nota{font-weight:500;font-style:italic}
+/* Seta da legenda: maior, peso forte, opacidade total (cor só no símbolo).
+   Cores vêm das MESMAS variáveis usadas pelos indicadores sobre os pontos. */
+.evolution-card .status-legend .lg-seta{font-size:15px;font-weight:800;line-height:1;opacity:1}
+.evolution-card .status-legend .lg-up{color:var(--evo-subiu)}
+.evolution-card .status-legend .lg-down{color:var(--evo-desceu)}
+.evolution-card .status-legend .lg-same{color:var(--evo-igual)}
 .evolution-card .status-legend i.lg-quarter{background:#64748B;border:2px solid #0e2f3b;border-radius:50%}
-/* SUBCARD do último PERÍODO VÁLIDO (período · status · nível · Editar): bloco
-   compacto e destacado no canto superior direito, DENTRO do card principal e
-   fora da área de desenho do gráfico (não cobre eixo, pontos, meses, níveis,
-   fechamentos nem legenda), sem novo card e sem aumentar a altura do card.
+/* SUBCARD do último PERÍODO VÁLIDO: bloco compacto e destacado no canto
+   superior direito, DENTRO do card principal e fora da área de desenho do
+   gráfico (não cobre eixo, pontos, meses, níveis, fechamentos nem legenda).
    Fundo/borda/etiqueta vêm de UMA única paleta por Status (PALETAS_STATUS em
-   App.jsx) via variáveis CSS; transição suave ao mudar o Status.
-   Em telas menores o subcard ocupa uma linha própria, abaixo dos textos e
-   antes do gráfico, em largura total. */
-.evolution-card .ev-topo{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:14px 18px}
+   App.jsx) via variáveis CSS; transição suave ao mudar o Status. */
+/* FAIXA SUPERIOR COMPACTA: título + Diretor/Unidade (esquerda) e subcard
+   (direita) tratados como uma única faixa que termina antes da área gráfica.
+   Gap reduzido + separação discreta (linha muito clara) + margem mínima —
+   sem área branca exagerada abaixo do cabeçalho. */
+.evolution-card .ev-topo{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:8px 16px;padding-bottom:8px;border-bottom:1px solid #e6eef2;margin-bottom:8px}
 .evolution-card .ev-textos{flex:1 1 300px;min-width:0}
+/* SUBCARD do último PERÍODO VÁLIDO em estrutura COMPACTA (3 linhas):
+   1) Período · 2) Status + Nível na mesma linha · 3) origem + Editar juntos.
+   Mesmas cores/bordas/fontes aprovadas; só os espaços internos foram
+   reduzidos. Em telas menores as linhas quebram automaticamente (flex-wrap). */
 .ev-resumo{
-  flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:8px;
-  text-align:right;margin-top:2px;padding:14px 16px;
+  flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:4px;
+  text-align:right;margin-top:0;padding:10px 14px;
   width:fit-content;min-width:285px;max-width:315px;
   background:var(--ev-fundo,#F1F5F9);
   border:2px solid var(--ev-borda,#94A3B8);
@@ -305,7 +336,12 @@ header p{color:rgba(255,255,255,0.85)}
   transition:background-color .25s ease,border-color .25s ease;
 }
 .evolution-card .ev-resumo .ev-linha{display:flex;align-items:center;justify-content:flex-end;gap:6px;white-space:nowrap;min-width:0;max-width:100%}
-.evolution-card .ev-resumo .ev-linha-status{margin-top:0}
+/* Linha 2 do subcard: Status e Nível na MESMA linha (quebra automática em
+   telas menores). Cada par preserva o próprio rótulo em negrito. */
+.evolution-card .ev-resumo .ev-linha-sn{flex-wrap:wrap;gap:4px 12px}
+.evolution-card .ev-resumo .ev-par{display:inline-flex;align-items:center;gap:6px;min-width:0}
+/* Linha 3 do subcard: origem da atualização e botão Editar juntos. */
+.evolution-card .ev-resumo .ev-linha-acoes{justify-content:flex-end;align-items:center;gap:10px}
 .evolution-card .ev-resumo b{color:#0e2f3b;font-weight:700;font-size:14px;letter-spacing:.01em}
 .evolution-card .ev-resumo .ev-valor{font-size:17px;font-weight:700;color:#0e2f3b}
 /* Etiqueta FORTE do Status (cor somente aqui, nunca no bloco inteiro). */
@@ -319,10 +355,11 @@ header p{color:rgba(255,255,255,0.85)}
 .evolution-card .ev-resumo .ev-nivel{font-size:17px;font-weight:700;color:#0b4a5c}
 /* Ajuste manual aplicado sobre o último período: indicação discreta (sem
    justificativa, sem novo card) mostrada no resumo após salvar. */
-.evolution-card .ev-ajuste{font-size:11.5px;font-style:italic;color:#5b7c88;margin-top:0}
+.evolution-card .ev-ajuste{font-size:11.5px;font-style:italic;color:#5b7c88;margin-top:0;align-self:center}
 /* Botão de edição do Status/Nível: azul-petróleo principal do sistema
-   (var(--teal)) — apenas o estilo visual mudou; ação, modal e regra intactos. */
-.evolution-card .ev-editar{align-self:flex-end;border:1px solid transparent;background:var(--teal);border-radius:9px;padding:8px 16px;font:inherit;font-size:13.5px;font-weight:700;line-height:1.35;color:#fff;cursor:pointer;margin-top:2px;transition:background-color .15s ease,box-shadow .15s ease}
+   (var(--teal)) — apenas o estilo visual mudou; ação, modal e regra intactos.
+   Padding ligeiramente menor para caber na linha compacta com a origem. */
+.evolution-card .ev-editar{align-self:center;border:1px solid transparent;background:var(--teal);border-radius:9px;padding:7px 14px;font:inherit;font-size:13.5px;font-weight:700;line-height:1.35;color:#fff;cursor:pointer;margin-top:0;transition:background-color .15s ease,box-shadow .15s ease}
 .ev-editar:hover{background:#076e82}
 .ev-editar:focus-visible{outline:2px solid #04525f;outline-offset:2px}
 .ev-editar:active{transform:translateY(1px)}
@@ -404,17 +441,20 @@ header p{color:rgba(255,255,255,0.85)}
 }
 @media(max-width:760px){
   .evolution-card h2{font-size:20px}
-  .evolution-card .ev-sub{font-size:14px}
+  .evolution-card .ev-diretor-linha{font-size:13.5px}
+  .evolution-card .ev-diretor-nome{font-size:14px}
+  .evolution-card .ev-diretor-unidade{font-size:13px}
   .evolution-card .chart{height:354px}
   .evolution-card .chart-yaxis{flex:0 0 108px}
   .evolution-card .chart-yaxis .y-card-label{fill:#FFFFFF;font-size:12px;opacity:1}
   .evolution-card .line-seg{stroke-width:4}
   .evolution-card .chart-svg .val-nivel{font-size:11px}
+  .evolution-card .chart-svg .val-nivel-seta{font-size:16px}
   .evolution-card .chart-svg .val-nivel-word{font-size:9px}
   .evolution-card .chart-svg .x-label{font-size:10px}
   .evolution-card .chart-svg .x-ano{font-size:9px}
   .evolution-card .chart-svg .x-sub{font-size:11px}
-  .evolution-card .status-legend{font-size:11px}
+  .evolution-card .status-legend{font-size:13px}
   .ev-resumo{font-size:14px;gap:8px;padding:12px 14px}
   .ev-resumo .ev-linha{white-space:normal;flex-wrap:wrap}
 }

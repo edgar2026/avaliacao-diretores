@@ -87,6 +87,15 @@ export default function App(){
     return buildDirectorMonthlyEvolution(visible,model.avaliacoes,director);
   },[model,director,visible]);
 
+  // Unidades do diretor selecionado na seleção atual (sem inventar unidade
+  // principal): lista compacta exibida abaixo do título do gráfico de
+  // evolução. Se houver mais de uma unidade, aparecem unidas por "·".
+  const evUnidades=useMemo(()=>{
+    const s=new Set();
+    for(const r of visible){const u=String(r.unidade||'').replace(/\s+/g,' ').trim();if(u)s.add(u);}
+    return [...s];
+  },[visible]);
+
   // Resumo do ÚLTIMO PONTO VÁLIDO da linha (o mesmo ponto que o gráfico
   // desenha): rótulo ORIGINAL do período, status daquele período e nível
   // plotado. Sem informação válida a interface mostra "Não informado" — nunca
@@ -242,7 +251,7 @@ export default function App(){
           nenhum gráfico, dimensão, dado ou regra foi alterado). O resumo do
           último período válido ocupa o canto superior direito do card, ao lado
           do título e dos textos — nunca dentro da área do gráfico. */}
-      {evolution&&<section className="card evolution-card"><div className="ev-topo"><div className="ev-textos"><h2>Evolução mensal do Status e do Nível</h2><p className="ev-sub">A linha representa o Status, e o algarismo romano sobre cada ponto indica o Nível de desenvolvimento.</p></div>{evResumo&&<div className="ev-resumo" style={evEstilo}><div className="ev-linha"><b>Período:</b> <span className="ev-valor">{evResumo.periodo||'Não informado'}</span></div><div className="ev-linha ev-linha-status"><b>Status:</b> <span className="ev-badge">{evResumo.status||'Não informado'}</span></div><div className="ev-linha"><b>Nível:</b> <span className="ev-nivel">{evResumo.nivel||'Não informado'}</span></div>{evResumo.ajustado&&<div className="ev-ajuste">Atualizado no sistema</div>}{evResumo.periodoId&&<button type="button" className="ev-editar" onClick={()=>{setEditorSucesso('');setEditorAberto(true);}}>Editar</button>}{editorSucesso&&<div className="ev-sucesso" role="status">{editorSucesso}</div>}</div>}</div><ErrorBoundary titulo="Não foi possível desenhar o gráfico de evolução"><div className="chart"><MonthlyEvolutionChart periods={evolution.periods} series={evolution.series}/></div></ErrorBoundary></section>}
+      {evolution&&<section className="card evolution-card"><div className="ev-topo"><div className="ev-textos"><h2>Evolução mensal do Status e do Nível</h2><div className="ev-diretor"><div className="ev-diretor-linha"><b>Diretor:</b> <span className="ev-diretor-nome">{director}</span></div><div className="ev-diretor-linha"><b>Unidade:</b> <span className="ev-diretor-unidade">{evUnidades.join(' · ')||'Não informado'}</span></div></div></div>{evResumo&&<div className="ev-resumo" style={evEstilo}><div className="ev-linha"><b>Período:</b> <span className="ev-valor">{evResumo.periodo||'Não informado'}</span></div><div className="ev-linha ev-linha-sn"><span className="ev-par"><b>Status:</b> <span className="ev-badge">{evResumo.status||'Não informado'}</span></span><span className="ev-par"><b>Nível:</b> <span className="ev-nivel">{evResumo.nivel||'Não informado'}</span></span></div><div className="ev-linha ev-linha-acoes">{evResumo.ajustado&&<div className="ev-ajuste">Atualizado no sistema</div>}{evResumo.periodoId&&<button type="button" className="ev-editar" onClick={()=>{setEditorSucesso('');setEditorAberto(true);}}>Editar</button>}</div>{editorSucesso&&<div className="ev-sucesso" role="status">{editorSucesso}</div>}</div>}</div><ErrorBoundary titulo="Não foi possível desenhar o gráfico de evolução"><div className="chart"><MonthlyEvolutionChart periods={evolution.periods} series={evolution.series}/></div></ErrorBoundary></section>}
       {/* Pareceres (JUSTIFICATIVA + Parecer de Operações) entre o último
           gráfico e a Matriz histórica — apenas mudança de posição na página. */}
       <Pareceres regional={regional} diretor={director} registros={model.registros} avaliacoes={model.avaliacoes}/>
