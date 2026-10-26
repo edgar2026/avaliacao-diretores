@@ -23,6 +23,7 @@ npm run dev       # http://localhost:5173
 ## Build e preview de produção
 
 ```bash
+npm run typecheck # tsc --noEmit — 0 erros
 npm run build     # gera a pasta dist/
 npm run preview   # serve dist/ em http://localhost:4173
 ```

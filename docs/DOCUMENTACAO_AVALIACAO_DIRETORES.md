@@ -20,18 +20,51 @@ O protótipo React + Vite permite importar a planilha de avaliação de diretore
 
 ## 2. Arquitetura (frontend)
 
+> **Migração para TypeScript concluída (2026-10-26).** Todo o código de `src/`
+> é `.ts`/`.tsx` (zero `.js`/`.jsx`); `npm run typecheck` (`tsc --noEmit`)
+> passa com 0 erros; `npm run build` gera bundle byte-idêntico ao pré-migração
+> (anotações de tipo são erasadas; casts `as` não têm efeito de runtime).
+> Estrutura final (pastas `app/`, `features/`, `lib/`, `styles/`):
+
+```
+src/
+  main.tsx                          # entry (raiz — path do Vite)
+  vite-env.d.ts                     # ImportMetaEnv (VITE_SUPABASE_*)
+  app/App.tsx                       # raiz da aplicação
+  components/                       # UI compartilhada
+    ConfirmModal.tsx
+    ErrorBoundary.tsx
+  features/
+    dashboard/                      # Charts, EditorPeriodo, StatusTimeline (órfão)
+    importacao/                     # ImportDialog
+    indicadores/                    # IndicadoresPainel
+    matriz/                         # PerformanceMatrix, PeriodosManuais
+    pareceres/                      # Pareceres
+  lib/dataParser.ts                 # parser da planilha (XLSX)
+  services/                         # camada de dados (15 services .ts)
+  styles/styles.css                 # CSS puro
+  types/                            # contratos de dados (supabase, modelo, planilha…)
+```
+
 | Camada | Arquivo | Papel |
 | --- | --- | --- |
-| Cliente Supabase | `src/services/supabaseClient.js` | Lê `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`; cria o cliente **uma vez**, sem persistir sessão |
-| Validação de arquivo | `src/services/fileValidator.js` | Extensão, tamanho (15 MB), mensagens de erro |
-| Hash | `src/services/hashService.js` | SHA-256 do arquivo via `crypto.subtle` (Web Crypto) |
-| Storage | `src/services/storageService.js` | Convenção de caminho, nome seguro, content-type e upload sem sobrescrita |
-| Persistência | `src/services/avaliacoesService.js` | Avaliação, registros, períodos, indicadores (lotes de 500) e checagem de duplicidade por hash |
-| Orquestração | `src/services/importService.js` | Fluxo completo, estágios, `ImportError` com estágio/código |
-| Leitura dos dashboards | `src/services/dashboardService.js` | Carrega **somente** avaliações `publicada` (avaliações + registros + períodos + indicadores, em lotes/paginação — sem N+1) e monta o modelo de comparação |
-| Parser/análise | `src/dataParser.js` | `analyzeWorkbookBuffer` (prévia), `analysisToDataset` e os matchers de indicadores compartilhados com o dashboard |
-| UI | `src/components/ImportDialog.jsx` | Prévia, metadados, progresso, sucesso/erro |
-| Upload | `src/App.jsx` | `upload()` → análise → diálogo → `runImport`; dashboards alimentados pelo Supabase |
+| Cliente Supabase | `src/services/supabaseClient.ts` | Lê `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`; cria o cliente **uma vez**, sem persistir sessão |
+| Validação de arquivo | `src/services/fileValidator.ts` | Extensão, tamanho (15 MB), mensagens de erro |
+| Hash | `src/services/hashService.ts` | SHA-256 do arquivo via `crypto.subtle` (Web Crypto) |
+| Storage | `src/services/storageService.ts` | Convenção de caminho, nome seguro, content-type e upload sem sobrescrita |
+| Persistência | `src/services/avaliacoesService.ts` | Avaliação, registros, períodos, indicadores (lotes de 500) e checagem de duplicidade por hash |
+| Orquestração | `src/services/importService.ts` | Fluxo completo, estágios, `ImportError` com estágio/código |
+| Leitura dos dashboards | `src/services/dashboardService.ts` | Carrega **somente** avaliações `publicada` (avaliações + registros + períodos + indicadores, em lotes/paginação — sem N+1) e monta o modelo de comparação |
+| Parser/análise | `src/lib/dataParser.ts` | `analyzeWorkbookBuffer` (prévia), `analysisToDataset` e os matchers de indicadores compartilhados com o dashboard |
+| UI | `src/features/importacao/ImportDialog.tsx` | Prévia, metadados, progresso, sucesso/erro |
+| Upload | `src/app/App.tsx` | `upload()` → análise → diálogo → `runImport`; dashboards alimentados pelo Supabase |
+
+Regras de manutenção TypeScript:
+
+- Imports de serviços usam extensão `.js` que resolve para `.ts` (convenção do projeto); imports de componentes usam `.tsx` explícito.
+- `tsconfig.json`: `strict:false`, `allowJs:true`, `checkJs:false`, `noEmit:true`, `allowImportingTsExtensions:true`.
+- Nenhum `any` sem justificativa documentada; casts `as`/`as unknown as` com comentário são o padrão aceito (interop CJS/ESM de `exceljs`/`jspdf-autotable`, `doc.internal.getNumberOfPages`, weak-type detection em `janelaDeAnos`).
+- Preservar comportamento legado bugado quando existir (ex.: `importPlan` lê `ind.nome` mas o parser grava `name` — cast documentado, lógica intacta).
 
 Observações importantes:
 
@@ -105,10 +138,18 @@ Limitações conhecidas da fase provisória:
 ## 6. Testes e build
 
 ```bash
+npm run typecheck         # tsc --noEmit — 0 erros
 npm test                  # unitários (node:test, sem rede)
 npm run test:integration  # integração (dashboard/RLS no Supabase real; importação via fake)
 npm run build             # vite build
 ```
+
+> **Pendência (Fase 9 — migração dos testes):** os 16 arquivos `.mjs` de
+> `tests/` importam caminhos `src/**.js` que deixaram de existir após a
+> migração para TypeScript (`src/**.ts`). `npm run test` está **quebrado**
+> até a Fase 9 (opções planejadas: `tsx --test` ou migração para `vitest`).
+> Aprovado como risco R1 no plano de migração. Build e typecheck não são
+> afetados.
 
 - **Unitários (66)**: validação de arquivo, hash SHA-256, caminho/nome do Storage, detecção dinâmica de períodos e indicadores no `exemplo-planilha.xlsx`, campos obrigatórios ausentes, duplicidades, classificação de hash duplicado, **modelo dos dashboards** (ordenação, métricas EAV→nomes amigáveis, agregados, cascata regional→diretor, rótulos compostos, contrato `metricas`, `recordMetric`, `buildRadarSeries`, **contagem definitiva de diretores/unidades** e **abreviação dos rótulos de períodos**), **evolução mensal individual** (`parseMonthHeader`, `buildMonthlyLabelMap`, `buildDirectorMonthlyEvolution`) e **vínculo/exibição das observações** (`resolveObservacaoVinculo`, `observacaoFiltros`, `observacaoVisivel`, `validarObservacao`, `formatarDataHora` — inclui "observação de Hesdras nunca aparece para Gregorio/Cilene").
 - **Integração (11)**: divididos para **nunca deixar dados permanentes** no Supabase real:
