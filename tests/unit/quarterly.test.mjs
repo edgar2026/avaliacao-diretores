@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseQuarterHeader, buildQuarterLabelMap } from '../../src/services/dashboardService.js';
-import { romanLevel } from '../../src/dataParser.js';
+import { parseQuarterHeader, buildQuarterLabelMap } from '../../src/services/dashboardService.ts';
+import { romanLevel } from '../../src/lib/dataParser.ts';
 
 test('parseQuarterHeader: reconhece variações reais de cabeçalho de trimestre', () => {
   const casos = [

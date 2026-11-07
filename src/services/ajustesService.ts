@@ -1,5 +1,5 @@
-import { getSupabase } from './supabaseClient.js';
-import { romanLevel } from '../lib/dataParser.js';
+import { getSupabase } from './supabaseClient.ts';
+import { romanLevel } from '../lib/dataParser.ts';
 import type { ValorVigente, OpcaoNivel, ResultadoValidacaoNivel, SalvarAjustePayload, RestaurarPayload, AplicarRestauracaoPayload } from '../types/ajustes';
 import type { AjusteRow } from '../types/supabase';
 import type { DashboardModel, Registro, Periodo } from '../types/modelo';

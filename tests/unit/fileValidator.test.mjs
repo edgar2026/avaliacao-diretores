@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateSpreadsheetFile, MAX_FILE_BYTES, getExtension, formatBytes } from '../../src/services/fileValidator.js';
+import { validateSpreadsheetFile, MAX_FILE_BYTES, getExtension, formatBytes } from '../../src/services/fileValidator.ts';
 
 test('rejeita extensão inválida', () => {
   const result = validateSpreadsheetFile({ name: 'relatorio.pdf', size: 1000 });

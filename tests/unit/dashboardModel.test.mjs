@@ -4,8 +4,8 @@ import {
   buildDashboardModel, aggregateRegistros, regionalsOf, directorsOf,
   buildPeriodLabelMap, avgNumbers, avaliacaoLabel, recordMetric, buildRadarSeries,
   countDistinctNames, distinctNames, abbreviatePeriods, isPresentName
-} from '../../src/services/dashboardService.js';
-import { friendlyMetricName, romanLevel } from '../../src/dataParser.js';
+} from '../../src/services/dashboardService.ts';
+import { friendlyMetricName, romanLevel } from '../../src/lib/dataParser.ts';
 
 const raw = () => ({
   avaliacoes: [

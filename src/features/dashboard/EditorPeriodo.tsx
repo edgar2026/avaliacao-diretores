@@ -1,5 +1,5 @@
-﻿import { useMemo, useState } from 'react';
-import { NIVEL_OPCOES, salvarAjuste, validarNivel } from '../../services/ajustesService.js';
+import { useMemo, useState } from 'react';
+import { NIVEL_OPCOES, salvarAjuste, validarNivel } from '../../services/ajustesService.ts';
 import type { AjusteRow } from '../../types/supabase';
 import type { Nivel } from '../../types/status';
 

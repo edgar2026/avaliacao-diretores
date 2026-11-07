@@ -1,6 +1,6 @@
-﻿import React,{useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
-import {avaliacaoLabel} from '../../services/dashboardService.js';
-import {resolveObservacaoVinculo,formatarDataHora} from '../../services/observacoesService.js';
+import React,{useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
+import {avaliacaoLabel} from '../../services/dashboardService.ts';
+import {resolveObservacaoVinculo,formatarDataHora} from '../../services/observacoesService.ts';
 import {
   TIPOS_PARECER,
   TIPO_LABEL,
@@ -10,7 +10,7 @@ import {
   archiveParecer,
   parecerMaisRecente,
   parecerEditado
-} from '../../services/pareceresService.js';
+} from '../../services/pareceresService.ts';
 import ConfirmModal from '../../components/ConfirmModal.tsx';
 import type { TipoParecer } from '../../types/pareceres';
 import type { ObservacaoRow } from '../../types/supabase';

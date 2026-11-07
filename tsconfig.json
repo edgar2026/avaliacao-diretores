@@ -6,7 +6,7 @@
     "moduleDetection": "force",
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "allowJs": true,
+    "allowJs": false,
     "checkJs": false,
     "noEmit": true,
     "allowImportingTsExtensions": true,

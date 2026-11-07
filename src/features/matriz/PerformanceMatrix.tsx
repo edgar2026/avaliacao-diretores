@@ -1,4 +1,4 @@
-﻿import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   buildPeriodLabelMap,
   matrixPeriodColumns,
@@ -6,13 +6,13 @@ import {
   formatMetricCell,
   recordMetric,
   MATRIX_INDICATORS
-} from '../../services/dashboardService.js';
-import { friendlyMetricName } from '../../lib/dataParser.js';
+} from '../../services/dashboardService.ts';
+import { friendlyMetricName } from '../../lib/dataParser.ts';
 import {
   buildMatrixExportPayload,
   exportMatrixExcel,
   nomeArquivoMatriz
-} from '../../services/matrixExportService.js';
+} from '../../services/matrixExportService.ts';
 import type { Registro, Periodo, AvaliacaoModel } from '../../types/modelo';
 
 const norm = (v: unknown): string => String(v ?? '').replace(/\s+/g, ' ').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();

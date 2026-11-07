@@ -11,7 +11,7 @@ import {
   observacaoVisivel,
   formatarDataHora,
   listObservacoesDiretor
-} from '../../src/services/observacoesService.js';
+} from '../../src/services/observacoesService.ts';
 
 const AVALIACAO_ATUAL = 'aaaaaaaa-0000-4000-8000-000000000001';
 const AVALIACAO_ANTIGA = 'aaaaaaaa-0000-4000-8000-000000000002';

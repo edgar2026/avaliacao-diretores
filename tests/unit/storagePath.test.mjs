@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildStoragePath, sanitizeFileName, contentTypeFor } from '../../src/services/storageService.js';
+import { buildStoragePath, sanitizeFileName, contentTypeFor } from '../../src/services/storageService.ts';
 
 test('caminho segue a convenção avaliacoes/{ano}/{trimestre}/{avaliacao_id}/{timestamp}-{nome}.xlsx', () => {
   const path = buildStoragePath({ ano: 2026, trimestre: 3, avaliacaoId: 'abc-123', fileName: 'Status Diretores (Final).xlsx', timestamp: 1700000000000 });

@@ -1,11 +1,11 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   NAO_INFORMADO,
   NIVEL_OPCOES,
   ROMANOS,
   restaurarValorImportado,
   salvarAjuste
-} from '../../services/ajustesService.js';
+} from '../../services/ajustesService.ts';
 import {
   MESES,
   anoSugerido,
@@ -16,8 +16,8 @@ import {
   origemDoPeriodo,
   salvarPeriodoManual,
   trimestreDoMes
-} from '../../services/periodosManuais.js';
-import type { LinhaPeriodoDiretor, ResultadoSalvarPeriodoManual } from '../../services/periodosManuais.js';
+} from '../../services/periodosManuais.ts';
+import type { LinhaPeriodoDiretor, ResultadoSalvarPeriodoManual } from '../../services/periodosManuais.ts';
 import IndicadoresPainel from '../indicadores/IndicadoresPainel.tsx';
 import type { ResultadoIndicadores } from '../indicadores/IndicadoresPainel.tsx';
 import type { Registro, Periodo, AvaliacaoModel } from '../../types/modelo';

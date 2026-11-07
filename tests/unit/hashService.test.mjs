@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeSha256 } from '../../src/services/hashService.js';
+import { computeSha256 } from '../../src/services/hashService.ts';
 
 test('SHA-256 de bytes conhecidos', async () => {
   const hash = await computeSha256(new TextEncoder().encode('abc'));

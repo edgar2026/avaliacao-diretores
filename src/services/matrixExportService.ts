@@ -8,7 +8,7 @@
    - PDF: jsPDF + jspdf-autotable, em paisagem, cabeçalho repetido, quebra entre
      páginas, numeração e divisão em partes quando há muitas colunas. */
 
-import { formatMetricCell, recordMetric, MATRIX_INDICATORS } from './dashboardService.js';
+import { formatMetricCell, recordMetric, MATRIX_INDICATORS } from './dashboardService.ts';
 import type { Registro, Periodo } from '../types/modelo';
 
 const semAcento = (v: unknown): string => String(v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');

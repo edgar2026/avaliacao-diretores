@@ -1,5 +1,5 @@
-﻿import React from 'react';
-import { buildRadarSeries } from '../../services/dashboardService.js';
+import React from 'react';
+import { buildRadarSeries } from '../../services/dashboardService.ts';
 import type { PeriodoGrafico } from '../../types/modelo';
 import type { StatusEvoConfig, SetaConfig, TipoMudanca } from '../../types/graficos';
 

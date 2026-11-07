@@ -1,11 +1,11 @@
-﻿import React,{ useMemo, useState } from 'react';
-import { formatBytes } from '../../services/fileValidator.js';
-import { runImport, ImportError, STAGES, STAGE_LABELS } from '../../services/importService.js';
-import { buildUpdatePreview } from '../../services/previewService.js';
+import React,{ useMemo, useState } from 'react';
+import { formatBytes } from '../../services/fileValidator.ts';
+import { runImport, ImportError, STAGES, STAGE_LABELS } from '../../services/importService.ts';
+import { buildUpdatePreview } from '../../services/previewService.ts';
 import ConfirmModal from '../../components/ConfirmModal.tsx';
 import type { WorkbookAnalysis } from '../../types/planilha';
 import type { DashboardModel } from '../../types/modelo';
-import type { AvaliacaoHashInfo } from '../../services/avaliacoesService.js';
+import type { AvaliacaoHashInfo } from '../../services/avaliacoesService.ts';
 
 const STAGE_ORDER = [STAGES.ENVIANDO, STAGES.ATUALIZANDO_PERIODOS, STAGES.ATUALIZANDO_INDICADORES, STAGES.ATUALIZANDO_CADASTROS, STAGES.CONCLUIDO];
 
@@ -25,7 +25,7 @@ interface ImportDialogProps {
   onImported: (result: RelatorioImportado) => void;
 }
 
-// Relatório devolvido pelo runImport (services/importService.js) — a tela de
+// Relatório devolvido pelo runImport (services/importService.ts) — a tela de
 // sucesso e o chamador (App) leem os mesmos campos.
 export interface RelatorioImportado {
   titulo?: string;

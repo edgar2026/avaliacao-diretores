@@ -1,4 +1,4 @@
-import { getSupabase } from './supabaseClient.js';
+import { getSupabase } from './supabaseClient.ts';
 import type { AjusteIndicadorRow } from '../types/supabase';
 
 // ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as XLSX from 'xlsx';
-import { analyzeWorkbookBuffer, analyzeRows, parseRows } from '../../src/dataParser.js';
+import { analyzeWorkbookBuffer, analyzeRows, parseRows } from '../../src/lib/dataParser.ts';
 
 // Fixture movida para tests/fixtures: planilha de exemplo nunca fica na raiz
 // nem em public/ (não vai para o build nem para a pasta pública da Vercel).

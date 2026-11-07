@@ -1,7 +1,7 @@
 import {
   parseMonthHeader, nameKey, isPresentName, janelaDeAnos, buildMonthlyLabelMap
-} from './dashboardService.js';
-import { friendlyMetricName } from '../lib/dataParser.js';
+} from './dashboardService.ts';
+import { friendlyMetricName } from '../lib/dataParser.ts';
 import type { WorkbookAnalysis, RegistroPlanilha, IndicadorPlanilhaLinha, CelulaHistorico } from '../types/planilha';
 import type { DashboardModel, Registro, Periodo, Indicador, Metricas } from '../types/modelo';
 import type { Divergencia, Completacao, LinhaPeriodo, InsercaoPeriodos, ResumoPlano } from '../types/importacao';

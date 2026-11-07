@@ -1,12 +1,12 @@
-﻿import React,{useEffect,useMemo,useRef,useState} from 'react';
-import {analyzeWorkbookBuffer} from '../lib/dataParser.js';
-import {validateSpreadsheetFile} from '../services/fileValidator.js';
-import {loadPublishedDashboard,buildDashboardModel,regionalsOf,directorsOf,buildDirectorMonthlyEvolution,avgNumbers,recordMetric,countDistinctNames,matrixPeriodColumns,aplicarAjusteIndicadorNoModelo} from '../services/dashboardService.js';
-import {isSupabaseConfigured} from '../services/supabaseClient.js';
-import {computeSha256} from '../services/hashService.js';
-import {findAvaliacoesByHash} from '../services/avaliacoesService.js';
-import {opcoesStatus as opcoesStatusDoModelo,aplicarAjusteNoModelo,aplicarRestauracaoNoModelo} from '../services/ajustesService.js';
-import {aplicarPeriodoManualNoModelo} from '../services/periodosManuais.js';
+import React,{useEffect,useMemo,useRef,useState} from 'react';
+import {analyzeWorkbookBuffer} from '../lib/dataParser.ts';
+import {validateSpreadsheetFile} from '../services/fileValidator.ts';
+import {loadPublishedDashboard,buildDashboardModel,regionalsOf,directorsOf,buildDirectorMonthlyEvolution,avgNumbers,recordMetric,countDistinctNames,matrixPeriodColumns,aplicarAjusteIndicadorNoModelo} from '../services/dashboardService.ts';
+import {isSupabaseConfigured} from '../services/supabaseClient.ts';
+import {computeSha256} from '../services/hashService.ts';
+import {findAvaliacoesByHash} from '../services/avaliacoesService.ts';
+import {opcoesStatus as opcoesStatusDoModelo,aplicarAjusteNoModelo,aplicarRestauracaoNoModelo} from '../services/ajustesService.ts';
+import {aplicarPeriodoManualNoModelo} from '../services/periodosManuais.ts';
 import ImportDialog,{type AnalysisComBuffer,type RelatorioImportado} from '../features/importacao/ImportDialog.tsx';
 import EditorPeriodo from '../features/dashboard/EditorPeriodo.tsx';
 import PeriodosManuais from '../features/matriz/PeriodosManuais.tsx';
@@ -14,9 +14,12 @@ import ErrorBoundary from '../components/ErrorBoundary.tsx';
 import PerformanceMatrix from '../features/matriz/PerformanceMatrix.tsx';
 import Pareceres from '../features/pareceres/Pareceres.tsx';
 import {MonthlyEvolutionChart,RadarChart} from '../features/dashboard/Charts.tsx';
+import CapturaEvolucaoPdf from '../features/dashboard/CapturaEvolucaoPdf.tsx';
+import ConfirmModal from '../components/ConfirmModal.tsx';
+import {montarItensEvolucaoPdf,nomeArquivoEvolucaoPdf,larguraAreaCaptura,capturarAreaPdf,criarDocumentoPdf,adicionarPaginaCapturada,adicionarPaginaAvisoPdf,finalizarDocumentoPdf,comTempoLimite,dormir,opcaoCapturaPorEscopo,type EscopoEvolucaoPdf,type ItemEvolucaoPdf,type ResumoEvolucaoPdf,type ImagemCapturada,type DocEvolucaoPdf} from '../services/evolucaoPdfService.ts';
 import type {DashboardModel} from '../types/modelo';
 import type {AjusteRow} from '../types/supabase';
-import type {AvaliacaoHashInfo} from '../services/avaliacoesService.js';
+import type {AvaliacaoHashInfo} from '../services/avaliacoesService.ts';
 import type {ResultadoPeriodosManuais} from '../features/matriz/PeriodosManuais.tsx';
 const avg=a=>avgNumbers(a);
 const fmt=(v,name='')=>v==null?'—':['Ritmo de captação','Crescimento de matrículas','Evasão','EBITDA'].includes(name)?`${(v*100).toLocaleString('pt-BR',{maximumFractionDigits:1,minimumFractionDigits:1})}%`:v.toLocaleString('pt-BR',{maximumFractionDigits:2,minimumFractionDigits:2});
@@ -52,6 +55,12 @@ interface PendenteImport {
   arquivosIguais: AvaliacaoHashInfo[];
 }
 
+// Exportação em lote do PDF da evolução: tempo limite por PÁGINA (renderização
+// + captura juntas) e pausa curta entre páginas para o navegador processar a
+// fila de eventos e liberar a interface.
+const TEMPO_PAGINA_MS=15000;
+const PAUSA_ENTRE_PAGINAS_MS=50;
+
 export default function App(){
  const [model,setModel]=useState<DashboardModel|null>(null),[loading,setLoading]=useState(true),[loadError,setLoadError]=useState(''),
   [regional,setRegional]=useState(''),[director,setDirector]=useState(''),
@@ -73,6 +82,16 @@ export default function App(){
   const [editorAberto,setEditorAberto]=useState(false),[editorSucesso,setEditorSucesso]=useState(''),
   [periodosAberto,setPeriodosAberto]=useState(false);
  const fileRef=useRef<HTMLInputElement>(null);
+
+ // Exportação em PDF da “Evolução mensal do Status e do Nível”: confirmação
+ // compacta (escopo, Regional, diretores, páginas) e execução em lote com
+ // UMA página por diretor, capturando a área isolada (fora da tela) sem
+ // alterar os filtros nem a seleção visível da aplicação.
+  const [pdfPreparo,setPdfPreparo]=useState<{escopo:EscopoEvolucaoPdf;itens:ItemEvolucaoPdf[];nome:string;regionais:number;diretores:number}|null>(null),
+  [pdfExecucao,setPdfExecucao]=useState<{itens:ItemEvolucaoPdf[];indice:number;nome:string;escopo:EscopoEvolucaoPdf}|null>(null),
+  [pdfProgresso,setPdfProgresso]=useState('');
+ const captureRef=useRef<HTMLDivElement|null>(null);
+ const pdfDocRef=useRef<DocEvolucaoPdf|null>(null);
 
  // Sem variáveis de ambiente o usuário vê uma mensagem clara de configuração
  // ausente (nunca tela branca, nunca dados de exemplo carregados sozinhos).
@@ -147,6 +166,138 @@ export default function App(){
     return ()=>clearTimeout(t);
   },[editorSucesso]);
 
+  // Motor da exportação em PDF: UM diretor por vez, de forma SEQUENCIAL e
+  // com TEMPO LIMITE por página. A área isolada é renderizada pelo React
+  // (pdfExecucao) e só é fotografada depois de confirmada (data-indice +
+  // dimensões). Cada captura entra no jsPDF e é descartada na hora; o
+  // canvas é zerado pelo serviço. Falha ou timeout de UM diretor vira
+  // página de aviso e o lote CONTINUA — nenhum diretor bloqueia os demais.
+  // No fim: rodapé em todas as páginas + download (Blob no modo geral) e
+  // liberação do botão e dos elementos temporários.
+  const loteTokenRef=useRef(0);
+  const loteAtivoRef=useRef(false);
+
+  // Cancela um lote em andamento somente se a aplicação for desmontada.
+  useEffect(()=>()=>{loteTokenRef.current++;loteAtivoRef.current=false;},[]);
+
+  // Espera a área isolada estar renderizada COM o diretor do índice atual.
+  // Usa polling curto (setTimeout — funciona mesmo com a aba em segundo
+  // plano); nunca usa requestAnimationFrame nem espera infinita.
+  function aguardarCapturaPronta(indice:number,prazoMs:number,ativo:()=>boolean):Promise<HTMLElement>{
+    return new Promise<HTMLElement>((resolve,reject)=>{
+      const prazo=Date.now()+Math.max(1,prazoMs);
+      let largAnt=-1,altAnt=-1;
+      const checar=()=>{
+        if(!ativo()){reject(new Error('Exportação de PDF cancelada.'));return;}
+        const node=captureRef.current;
+        if(node&&node.isConnected&&node.dataset.indice===String(indice)&&node.scrollWidth>0&&node.scrollHeight>0){
+          // Só considera pronta quando as dimensões estão ESTÁVEIS (duas
+          // leituras iguais seguidas): o ResizeObserver do gráfico já aplicou.
+          const w=node.scrollWidth,h=node.scrollHeight;
+          if(w===largAnt&&h===altAnt){resolve(node);return;}
+          largAnt=w;altAnt=h;
+        }else{largAnt=-1;altAnt=-1;}
+        if(Date.now()>=prazo){reject(new Error(`Tempo esgotado aguardando a renderização do gráfico (página ${indice+1}).`));return;}
+        window.setTimeout(checar,20);
+      };
+      checar();
+    });
+  }
+
+  async function executarLotePdf(preparo:{itens:ItemEvolucaoPdf[];nome:string;escopo:EscopoEvolucaoPdf}){
+    const {itens,nome,escopo}=preparo;
+    const token=++loteTokenRef.current;
+    const ativo=()=>loteTokenRef.current===token;
+    const total=itens.length;
+    const opcoes=opcaoCapturaPorEscopo(escopo);
+    const inicioLote=Date.now();
+    let geradas=0,avisos=0;
+    let etapa='início',pagina=0,regionalAtual='',diretorAtual='';
+    try{
+      console.info(`[avaliacao-diretores] PDF da evolução: iniciando modo ${escopo} com ${total} página(s).`);
+      etapa='criação do documento';
+      setPdfProgresso(`Preparando ${total} página(s)…`);
+      const doc=await criarDocumentoPdf();
+      pdfDocRef.current=doc;
+      etapa='carregamento de fontes';
+      if(document.fonts&&document.fonts.ready){
+        try{await comTempoLimite(document.fonts.ready,5000,'carregamento de fontes');}catch{/* fontes atuais já servem */}
+      }
+      for(let indice=0;indice<total;indice++){
+        if(!ativo())break;
+        const atual=itens[indice];
+        pagina=indice+1;regionalAtual=atual.regional;diretorAtual=atual.diretor;
+        setPdfExecucao({itens,indice,nome,escopo});
+        setPdfProgresso(escopo==='geral'
+          ? `Gerando página ${pagina} de ${total}: ${atual.regional} · ${atual.diretor}`
+          : `Gerando página ${pagina} de ${total}`);
+        // Tempo limite SEGURO por página (renderização + captura juntas).
+        const limitePagina=Date.now()+TEMPO_PAGINA_MS;
+        const restante=()=>Math.max(500,limitePagina-Date.now());
+        let falha='';
+        let img:ImagemCapturada|null=null;
+        try{
+          etapa='renderização do gráfico';
+          const node=await comTempoLimite(aguardarCapturaPronta(indice,restante(),ativo),restante(),`renderização do gráfico (página ${pagina})`);
+          await dormir(60);
+          if(!ativo())break;
+          etapa='captura do gráfico';
+          img=await comTempoLimite(capturarAreaPdf(node,opcoes.escala,opcoes),restante(),`captura do gráfico (página ${pagina})`);
+          if(!ativo())break;
+          etapa='adição da página ao PDF';
+          adicionarPaginaCapturada(doc,img,indice);
+          geradas++;
+        }catch(err){
+          if(!ativo())break;
+          falha=String(err?.message||err);
+          console.error(`[avaliacao-diretores] PDF da evolução: etapa=${etapa}, página=${pagina} de ${total}, regional=${regionalAtual}, diretor=${diretorAtual}, erro=${falha}`);
+        }finally{
+          img=null;
+        }
+        if(falha&&ativo()){
+          etapa='página de aviso';
+          try{
+            adicionarPaginaAvisoPdf(doc,indice,regionalAtual,diretorAtual,`Não foi possível gerar o gráfico deste diretor. ${falha}`);
+            avisos++;
+          }catch(errAviso){
+            console.error(`[avaliacao-diretores] PDF da evolução: falha ao montar a página de aviso ${pagina} (${diretorAtual}):`,errAviso?.message||String(errAviso));
+          }
+        }
+        etapa='pausa entre páginas';
+        await dormir(PAUSA_ENTRE_PAGINAS_MS);
+      }
+      if(!ativo())return;
+      etapa='finalização do PDF';
+      setPdfProgresso('Finalizando PDF...');
+      const paginas=doc.getNumberOfPages();
+      if(paginas<1)throw new Error('O PDF não possui páginas após o processamento dos diretores.');
+      await comTempoLimite(
+        finalizarDocumentoPdf(doc,nome,escopo==='geral'?itens.map(i=>i.regional):undefined,{viaBlob:escopo==='geral'}),
+        60000,
+        'finalização e download do PDF'
+      );
+      etapa='download concluído';
+      const duracao=Math.round((Date.now()-inicioLote)/1000);
+      if(escopo==='geral'){
+        setMessage(avisos===0
+          ? `PDF gerado com sucesso: ${paginas} páginas.`
+          : `PDF gerado com ${geradas} páginas e ${avisos} página${avisos>1?'s':''} de aviso${avisos>1?'s':''}.`);
+      }else{
+        setMessage(`PDF gerado com sucesso: “${nome}” — ${paginas} página(s).`);
+      }
+      console.info(`[avaliacao-diretores] PDF da evolução concluído: ${nome} — ${paginas} página(s) (${geradas} gráfica(s), ${avisos} de aviso) em ${duracao}s.`);
+    }catch(err){
+      const msg=String(err?.message||err);
+      console.error('[avaliacao-diretores] Falha ao gerar o PDF da evolução:',{etapa,pagina,regional:regionalAtual,diretor:diretorAtual,erro:msg});
+      setMessage(`Erro ao gerar o PDF (etapa: ${etapa}${diretorAtual?`, página ${pagina} — ${diretorAtual}`:''}): ${humanError(msg)}`);
+    }finally{
+      loteAtivoRef.current=false;
+      pdfDocRef.current=null;
+      setPdfExecucao(null);
+      setPdfProgresso('');
+    }
+  }
+
   // Chamado APÓS o banco confirmar a gravação: o modelo em memória recebe o
   // ajuste (resumo, último ponto do gráfico, tooltip e célula da matriz
   // atualizam na hora) e o formulário fecha. Nada é aplicado antes da
@@ -178,6 +329,44 @@ export default function App(){
       setModel(m=>m?aplicarAjusteNoModelo(m,info?.ajuste):m);
       setMessage('Status e nível atualizados com sucesso.');
     }
+  }
+
+  // Paleta do subcard do resumo (PALETAS_STATUS da tela) para a área isolada
+  // de captura: as MESMAS variáveis --ev-* do card exibido, sem tocar no
+  // componente nem no layout da aplicação.
+  const estiloDoResumo=(r:ResumoEvolucaoPdf|null):Record<string,string>|null=>{
+    if(!r)return null;
+    const p=PALETAS_STATUS[paletaStatus(r.status)];
+    return {'--ev-fundo':p.fundo,'--ev-borda':p.borda,'--ev-etq':p.etiqueta,'--ev-etq-texto':p.etiquetaTexto};
+  };
+
+  // “Baixar PDF”: monta o escopo a partir dos MESMOS registros da tela e abre
+  // a confirmação compacta antes de gerar. No modo GERAL (Todas as regionais +
+  // Todos os diretores) a coleção nasce do conjunto COMPLETO de registros
+  // ativos do modelo (allRecords) — nunca da lista filtrada de uma Regional.
+  function abrirConfirmacaoPdf(){
+    if(!model||loading||loteAtivoRef.current)return;
+    try{
+      const escopoGeral=!regional&&!director;
+      const base=escopoGeral?allRecords:visible;
+      const {escopo,itens}=montarItensEvolucaoPdf({registros:base,avaliacoes:model.avaliacoes,regional,diretor:director});
+      if(!itens.length){setMessage('Nenhum diretor visível para gerar o PDF.');return;}
+      const regionais=new Set(itens.map(i=>i.regional)).size;
+      const diretores=countDistinctNames(base,'diretor');
+      setPdfPreparo({escopo,itens:itens.map(it=>({...it,estilo:estiloDoResumo(it.resumo)})),nome:nomeArquivoEvolucaoPdf(escopo,{diretor:director,regional}),regionais,diretores});
+    }catch(err){setMessage(`Erro: ${humanError(err?.message||String(err))}`);}
+  }
+  function gerarPdfConfirmado(){
+    if(!pdfPreparo||loteAtivoRef.current)return;
+    loteAtivoRef.current=true;
+    pdfDocRef.current=null;
+    const preparo={itens:pdfPreparo.itens,nome:pdfPreparo.nome,escopo:pdfPreparo.escopo};
+    setPdfProgresso('Preparando…');
+    // A área isolada do PRIMEIRO diretor é renderizada já nesta atualização;
+    // o lote sequencial aguarda a confirmação (data-indice) antes de capturar.
+    setPdfExecucao({itens:preparo.itens,indice:0,nome:preparo.nome,escopo:preparo.escopo});
+    setPdfPreparo(null);
+    void executarLotePdf(preparo);
   }
 
  // INDICADORES: referência mais recente da avaliação = última coluna de
@@ -221,6 +410,8 @@ export default function App(){
   // única configuração — mudam automaticamente ao confirmar a edição do Status.
   const evPaleta=evResumo?PALETAS_STATUS[paletaStatus(evResumo.status)]:null;
   const evEstilo=evPaleta?({'--ev-fundo':evPaleta.fundo,'--ev-borda':evPaleta.borda,'--ev-etq':evPaleta.etiqueta,'--ev-etq-texto':evPaleta.etiquetaTexto} as React.CSSProperties):null;
+  // Item atual da captura isolada do PDF (UM diretor por vez, fora da tela).
+  const itemCaptura=pdfExecucao?(pdfExecucao.itens[pdfExecucao.indice]||null):null;
   // Selo “1 avaliação disponível” / “X avaliações disponíveis” REMOVIDO do
   // cabeçalho (remoção somente visual: nenhuma avaliação apagada, nenhuma
   // consulta alterada). Os cards de pareceres ocupam a área entre o último
@@ -230,6 +421,7 @@ export default function App(){
    <input ref={fileRef} hidden type="file" accept=".xlsx,.xls" onChange={upload}/><button className="upload" onClick={()=>fileRef.current.click()}><span>↑</span> Atualizar pela planilha</button>
    <label>Regional</label><select value={regional} onChange={e=>{setRegional(e.target.value);setDirector('')}} disabled={!model}><option value="">Todas as regionais</option>{regionals.map(x=><option key={x}>{x}</option>)}</select>
    <label>Diretor</label><select value={director} onChange={e=>setDirector(e.target.value)} disabled={!regional}><option value="">Todos os diretores</option>{directors.map(x=><option key={x}>{x}</option>)}</select>
+   <button type="button" className="upload baixar-pdf" onClick={abrirConfirmacaoPdf} disabled={!model||loading||!!pdfExecucao||countDistinctNames(visible,'diretor')===0}>Baixar PDF</button>
     <div className="profile"><b>{director||regional||'Todas as regionais'}</b><span>{visible.length} registro(s) · {countDistinctNames(visible,'diretor')} diretor(es) · {(model?.avaliacoes?.length)||0} avaliação(ões)</span></div>
    {message&&<div className="message">{message}</div>}
   </aside>
@@ -280,5 +472,17 @@ export default function App(){
   {/* Cadastro/edição manual de períodos pela Matriz (somente com diretor
       específico selecionado). */}
   {periodosAberto&&director&&model&&<PeriodosManuais registros={visible} avaliacoes={model.avaliacoes} statusOpcoes={statusOpcoes} onSalvo={aposSalvarPeriodo} onFechar={()=>setPeriodosAberto(false)}/>}
+  {/* Confirmação ANTES de gerar o PDF: escopo, Regional, quantidade de
+      diretores e páginas previstas (mesma quantidade), Cancelar / Gerar PDF. */}
+  {pdfPreparo&&<ConfirmModal aberto titulo="Gerar PDF da evolução"
+    mensagem="Confira o escopo antes de gerar. Cada diretor ocupa exatamente uma página."
+    detalhe={pdfPreparo.escopo==='geral'
+      ? `Escopo: Geral\nRegionais: ${pdfPreparo.regionais}\nDiretores: ${pdfPreparo.diretores}\nPáginas previstas: ${pdfPreparo.itens.length}`
+      : `Escopo: ${pdfPreparo.escopo==='individual'?'Individual':'Regional'}\nRegional: ${regional||'Todas'}\nDiretores: ${pdfPreparo.itens.length}\nPáginas previstas: ${pdfPreparo.itens.length}`}
+    textoConfirmar="Gerar PDF" textoCancelar="Cancelar"
+    onConfirm={gerarPdfConfirmado} onCancel={()=>setPdfPreparo(null)}/>}
+  {/* Progresso do lote + área de captura isolada (UM diretor por vez). */}
+  {pdfExecucao&&<div className="pdf-progresso" role="status">{pdfProgresso||'Preparando…'}</div>}
+  {itemCaptura&&pdfExecucao&&<CapturaEvolucaoPdf item={itemCaptura} indice={pdfExecucao.indice} largura={larguraAreaCaptura(itemCaptura.evolution?.periods.length||0)} captureRef={captureRef}/>}
  </div>
 }

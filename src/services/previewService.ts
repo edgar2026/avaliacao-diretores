@@ -1,12 +1,12 @@
-import { nameKey, normName, isPresentName, distinctNames, regionalsOf, matrixPeriodColumns } from './dashboardService.js';
-import { opcoesStatus } from './ajustesService.js';
-import { romanLevel } from '../lib/dataParser.js';
+import { nameKey, normName, isPresentName, distinctNames, regionalsOf, matrixPeriodColumns } from './dashboardService.ts';
+import { opcoesStatus } from './ajustesService.ts';
+import { romanLevel } from '../lib/dataParser.ts';
 import {
   planejarAtualizacao, baseDoModelo, chavePeriodo, statusLido, nivelLido
-} from './importPlan.js';
+} from './importPlan.ts';
 import type { DashboardModel, Registro, Periodo } from '../types/modelo';
 import type { WorkbookAnalysis } from '../types/planilha';
-import type { AvaliacaoHashInfo } from './avaliacoesService.js';
+import type { AvaliacaoHashInfo } from './avaliacoesService.ts';
 import type {
   PreviewResult, Pendencia, PeriodoNovoResumo, AjustePreservado, IndicadorDetalhe, MudancaCadastro
 } from '../types/importacao';
@@ -15,7 +15,7 @@ import type {
 // PRÉVIA DA ATUALIZAÇÃO PELA PLANILHA
 //
 // Comparação SOMENTE LEITURA. O coração da prévia é `planejarAtualizacao`
-// (src/services/importPlan.js) — a MESMA função pura que a gravação executa
+// (src/services/importPlan.ts) — a MESMA função pura que a gravação executa
 // (runImport), só que aqui sobre o model em memória e sem tocar em rede/
 // banco. A tela, portanto, mostra exatamente o que acontecerá:
 //   * registros NOVOS, REUTILIZADOS, REATIVADOS e ARQUIVADOS (identidade

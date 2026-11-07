@@ -268,7 +268,7 @@ order by created_at desc;
 
 ### 6.1 Leitura dos dashboards (fase 3)
 
-A camada `src/services/dashboardService.js` consulta **somente** avaliações `status = 'publicada'`, em lotes/paginação (sem uma requisição por registro):
+A camada `src/services/dashboardService.ts` consulta **somente** avaliações `status = 'publicada'`, em lotes/paginação (sem uma requisição por registro):
 
 ```sql
 -- cabeçalhos das avaliações publicadas (ordenadas para a linha do tempo)
@@ -301,4 +301,4 @@ Notas:
 
 - `dados_originais` **não** é baixado na leitura (jsonb pesado; os indicadores vêm da tabela EAV e os níveis da tabela de períodos).
 - As políticas `*_anon_provisorio` de SELECT permitem essa leitura no protótipo; na integração serão substituídas por políticas de usuário autenticado.
-- `avaliacoes_diretores_observacoes` é lida pelo CRUD da lateral (observação do regional) com `observacoesService.js`: sempre pelo **diretor selecionado** (`escopo='diretor'`, `arquivada_em is null`, mais `regional` e — quando disponíveis — `avaliacao_id`/`registro_id`); nunca consulta só pela regional.
+- `avaliacoes_diretores_observacoes` é lida pelo CRUD da lateral (observação do regional) com `observacoesService.ts`: sempre pelo **diretor selecionado** (`escopo='diretor'`, `arquivada_em is null`, mais `regional` e — quando disponíveis — `avaliacao_id`/`registro_id`); nunca consulta só pela regional.

@@ -1,6 +1,6 @@
-import { getSupabase } from './supabaseClient.js';
-import { friendlyMetricName, romanLevel } from '../lib/dataParser.js';
-import { valorVigente, nivelExibicao } from './ajustesService.js';
+import { getSupabase } from './supabaseClient.ts';
+import { friendlyMetricName, romanLevel } from '../lib/dataParser.ts';
+import { valorVigente, nivelExibicao } from './ajustesService.ts';
 import type { AvaliacaoRow, RegistroRow, PeriodoRow, IndicadorRow, AjusteRow } from '../types/supabase';
 import type {
   DashboardModel, DashboardRaw, Registro, Periodo, Indicador, Metricas, InfoMetrica,

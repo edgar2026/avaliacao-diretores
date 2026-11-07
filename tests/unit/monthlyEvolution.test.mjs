@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMonthHeader, buildMonthlyLabelMap, buildDirectorMonthlyEvolution } from '../../src/services/dashboardService.js';
+import { parseMonthHeader, buildMonthlyLabelMap, buildDirectorMonthlyEvolution } from '../../src/services/dashboardService.ts';
 
 // Cabeçalhos REAIS da Planilha1 (exemplo-planilha.xlsx), em ordem cronológica.
 const ROTULOS = [

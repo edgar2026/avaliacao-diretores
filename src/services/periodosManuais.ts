@@ -1,7 +1,7 @@
-import { getSupabase } from './supabaseClient.js';
-import { romanLevel } from '../lib/dataParser.js';
-import { nivelExibicao, validarNivel, validarStatus } from './ajustesService.js';
-import { buildMonthlyLabelMap, janelaDeAnos } from './dashboardService.js';
+import { getSupabase } from './supabaseClient.ts';
+import { romanLevel } from '../lib/dataParser.ts';
+import { nivelExibicao, validarNivel, validarStatus } from './ajustesService.ts';
+import { buildMonthlyLabelMap, janelaDeAnos } from './dashboardService.ts';
 import type { Registro, Periodo, DashboardModel } from '../types/modelo';
 import type { OrigemDado } from '../types/status';
 

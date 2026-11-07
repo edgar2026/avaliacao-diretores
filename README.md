@@ -1,6 +1,13 @@
 # Avaliação de Diretores
 
-SPA React + Vite (100% client-side) com Supabase — dashboards de desempenho dos diretores a partir de planilhas `.xlsx`/`.xls`, com importação pelo navegador, matriz histórica, evolução mensal, gráficos e observações do regional vinculadas ao diretor. Sem login (papel `anon` com RLS provisório), pronta para publicação na Vercel.
+SPA React + Vite (100% client-side) **em TypeScript** com Supabase — dashboards de desempenho dos diretores a partir de planilhas `.xlsx`/`.xls`, com importação pelo navegador, matriz histórica, evolução mensal, gráficos e observações do regional vinculadas ao diretor. Sem login (papel `anon` com RLS provisório), pronta para publicação na Vercel.
+
+## TypeScript
+
+- **Código-fonte 100% TypeScript**: `src/` contém apenas `.ts`/`.tsx` — **zero arquivos `.js`/`.jsx` e zero imports apontando para `.js`/`.jsx`** (extensões explícitas `.ts`/`.tsx`).
+- `tsconfig.json` com `allowJs:false` e `noEmit:true`; a guarda `scripts/check-src-js.mjs` (rodada pelo `npm run typecheck`) falha o build se algum JavaScript reaparecer em `src/`.
+- `npm run build` executa o typecheck antes do `vite build`; a configuração do Vite é `vite.config.ts`.
+- Estrutura: `src/app/App.tsx` (raiz) · `src/components/` (UI compartilhada) · `src/features/{dashboard,importacao,indicadores,matriz,pareceres}/` · `src/lib/dataParser.ts` (parser XLSX) · `src/services/` (camada de dados) · `src/types/` (contratos: `Registro`, `Periodo`, `Status`, `Nivel`, `DashboardModel`, `WorkbookAnalysis`, `PreviewResult`, `Row` do Supabase etc.) · `src/styles/styles.css`.
 
 ## Requisitos
 
@@ -23,18 +30,20 @@ npm run dev       # http://localhost:5173
 ## Build e preview de produção
 
 ```bash
-npm run typecheck # tsc --noEmit — 0 erros
-npm run build     # gera a pasta dist/
+npm run typecheck # guarda anti-JS em src/ + tsc --noEmit — 0 erros
+npm run build     # typecheck + gera a pasta dist/
 npm run preview   # serve dist/ em http://localhost:4173
 ```
 
 ## Testes
 
 ```bash
-npm test                  # unitários (66)
+npm test                  # unitários (75) — node:test + type stripping nativo do Node
 npm run test:integration  # integração (11) — usa o .env; somente leitura/fake
 npm run test:all          # ambos
 ```
+
+> Os arquivos de teste ficam em `tests/` (`.mjs`, fora de `src/`) e importam os módulos de `src/**.ts` com extensão explícita (requer Node ≥ 22.6 para o type stripping nativo).
 
 ## Variáveis de ambiente
 

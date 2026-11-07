@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyHashDuplicates } from '../../src/services/avaliacoesService.js';
+import { classifyHashDuplicates } from '../../src/services/avaliacoesService.ts';
 
 const hashRow = (over = {}) => ({ id: 'x', titulo: 't', ano: 2026, trimestre: 3, status: 'publicada', arquivo_hash: 'h', importado_em: 'now', ...over });
 

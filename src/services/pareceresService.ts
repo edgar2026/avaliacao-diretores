@@ -1,5 +1,5 @@
-import { getSupabase } from './supabaseClient.js';
-import { nameKey } from './dashboardService.js';
+import { getSupabase } from './supabaseClient.ts';
+import { nameKey } from './dashboardService.ts';
 import type { ObservacaoRow } from '../types/supabase';
 import type { TipoParecer, TipoParecerLabel, FiltroConsulta, ParecerPayload, ParecerFiltros } from '../types/pareceres';
 import type { Registro } from '../types/modelo';

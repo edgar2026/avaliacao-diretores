@@ -20,10 +20,15 @@ O protótipo React + Vite permite importar a planilha de avaliação de diretore
 
 ## 2. Arquitetura (frontend)
 
-> **Migração para TypeScript concluída (2026-10-26).** Todo o código de `src/`
-> é `.ts`/`.tsx` (zero `.js`/`.jsx`); `npm run typecheck` (`tsc --noEmit`)
-> passa com 0 erros; `npm run build` gera bundle byte-idêntico ao pré-migração
+> **Migração para TypeScript concluída e finalizada (2026-10-26).** Todo o código de `src/`
+> é `.ts`/`.tsx` (zero `.js`/`.jsx`); **zero imports apontando para `.js`/`.jsx`**
+> (extensões explícitas `.ts`/`.tsx` em todos os módulos); `npm run typecheck`
+> (guarda anti-JS + `tsc --noEmit`) passa com 0 erros; `npm run build` executa o
+> typecheck antes do `vite build` e gera bundle byte-idêntico ao pré-migração
 > (anotações de tipo são erasadas; casts `as` não têm efeito de runtime).
+> A configuração do Vite também é TypeScript (`vite.config.ts`) e o `tsconfig.json`
+> tem `allowJs:false` (novos `.js`/`.jsx` em `src/` são rejeitados pela guarda
+> `scripts/check-src-js.mjs`).
 > Estrutura final (pastas `app/`, `features/`, `lib/`, `styles/`):
 
 ```
@@ -61,10 +66,24 @@ src/
 
 Regras de manutenção TypeScript:
 
-- Imports de serviços usam extensão `.js` que resolve para `.ts` (convenção do projeto); imports de componentes usam `.tsx` explícito.
-- `tsconfig.json`: `strict:false`, `allowJs:true`, `checkJs:false`, `noEmit:true`, `allowImportingTsExtensions:true`.
+- Imports usam extensão **explícita**: `.ts` para módulos e `.tsx` para componentes — **nenhum import `.js`/`.jsx`** (nada de convenção `.js`→`.ts`).
+- `tsconfig.json`: `strict:false`, `allowJs:false`, `checkJs:false`, `noEmit:true`, `allowImportingTsExtensions:true`.
+- `scripts/check-src-js.mjs` (roda no início do `npm run typecheck`, e o `npm run build` roda o typecheck antes do `vite build`) falha o build se aparecer arquivo `.js`/`.jsx` ou import `.js`/`.jsx` em `src/`.
 - Nenhum `any` sem justificativa documentada; casts `as`/`as unknown as` com comentário são o padrão aceito (interop CJS/ESM de `exceljs`/`jspdf-autotable`, `doc.internal.getNumberOfPages`, weak-type detection em `janelaDeAnos`).
 - Preservar comportamento legado bugado quando existir (ex.: `importPlan` lê `ind.nome` mas o parser grava `name` — cast documentado, lógica intacta).
+
+### 2.1 Tipos principais (`src/types/`)
+
+| Arquivo | Contratos |
+| --- | --- |
+| `modelo.ts` | `Registro`, `Periodo`, `Indicador`, `Metricas`, `DashboardModel`/`AvaliacaoModel`, `AgregadosRegistro`, `PeriodoGrafico` |
+| `status.ts` | `Status`/`StatusConhecido`, `Nivel` (`I`–`V`), `NivelAlgarismo`/`NivelRoman`, `NivelExibicao`, `OrigemDado` |
+| `planilha.ts` | `WorkbookAnalysis`, `RegistroPlanilha`, `ColunaPeriodo`/`ColunaIndicador`, `CelulaHistorico`, `DuplicidadePlanilha` |
+| `supabase.ts` | `AvaliacaoRow`, `RegistroRow`, `PeriodoRow`, `IndicadorRow`, `AjusteRow`, `AjusteIndicadorRow`, `ObservacaoRow` |
+| `ajustes.ts` | `ValorVigente`, `OpcaoNivel`, `SalvarAjustePayload`, `AjusteIndicador`, `SalvarAjusteIndicadorPayload` |
+| `importacao.ts` | `PreviewResult`, `PlanoAtualizacao`, `ImportStage`, `ImportErrorInfo`, `Divergencia`, `Pendencia` |
+| `pareceres.ts` | `TipoParecer`, `ParecerPayload`, `ParecerFiltros`, `FiltroConsulta` |
+| `graficos.ts` | `RadarRecord`/`MetricaRadar`, `MonthlyEvolutionChartProps`, `RadarChartProps`, `SetaConfig`, `OpcaoStatus` |
 
 Observações importantes:
 
@@ -100,7 +119,7 @@ Sem essas variáveis, o app continua funcionando em modo local (dados de exemplo
 4. `INSERT` em `avaliacoes_diretores` com `status = 'processando'`.
 5. Upload do arquivo para `avaliacoes/{ano}/{trimestre}/{avaliacao_id}/{timestamp}-{nome-seguro}.xlsx` no bucket privado `avaliacoes-diretores-planilhas` (`upsert: false`).
 6. `UPDATE` do caminho/tamanho do arquivo na avaliação.
-7. **Base fresca + plano (fonte única da regra — §21)**: `carregarBaseImportacao()` relê o estado atual (somente avaliações `publicada`) e `planejarAtualizacao()` (`src/services/importPlan.js`) calcula as ações — a MESMA função pura da prévia. Em seguida a gravação executa o plano em estágios:
+7. **Base fresca + plano (fonte única da regra — §21)**: `carregarBaseImportacao()` relê o estado atual (somente avaliações `publicada`) e `planejarAtualizacao()` (`src/services/importPlan.ts`) calcula as ações — a MESMA função pura da prévia. Em seguida a gravação executa o plano em estágios:
    - `registros` — `INSERT` só dos **novos** (com o `avaliacao_id` desta importação); `UPDATE` dos reutilizados (situação atual), **reativados** (`arquivado_em = null`) e **arquivados** (`arquivado_em = agora`);
    - `periodos` — `INSERT` de períodos novos (ordem cronológica, completando a `ordem` dos vizinhos), `UPDATE` da `ordem` nas reposições e `UPDATE` de `estagio`/`nivel` **apenas onde estavam vazios** (completar);
    - `indicadores` — `INSERT` de indicadores novos e `UPDATE` de `valor_numerico`/`valor_texto` (nunca de `nome_indicador`/`registro_id`; ajuste manual não é substituído).
@@ -138,18 +157,24 @@ Limitações conhecidas da fase provisória:
 ## 6. Testes e build
 
 ```bash
-npm run typecheck         # tsc --noEmit — 0 erros
-npm test                  # unitários (node:test, sem rede)
+npm run typecheck         # guarda anti-JS em src/ + tsc --noEmit — 0 erros
+npm test                  # unitários (node:test, sem rede — 75 passing)
 npm run test:integration  # integração (dashboard/RLS no Supabase real; importação via fake)
-npm run build             # vite build
+npm run build             # typecheck antes do vite build
 ```
 
-> **Pendência (Fase 9 — migração dos testes):** os 16 arquivos `.mjs` de
-> `tests/` importam caminhos `src/**.js` que deixaram de existir após a
-> migração para TypeScript (`src/**.ts`). `npm run test` está **quebrado**
-> até a Fase 9 (opções planejadas: `tsx --test` ou migração para `vitest`).
-> Aprovado como risco R1 no plano de migração. Build e typecheck não são
-> afetados.
+> **Testes (status após a finalização da migração, 2026-10-26):** os 16
+> arquivos `.mjs` de `tests/` permanecem JavaScript (fora de `src/`, executados
+> pelo runner nativo `node:test`), mas os imports que apontavam para
+> `src/**.js` foram corrigidos para os caminhos reais `src/**.ts` (incluindo o
+> movimento de `dataParser` para `src/lib/`). `npm test` volta a passar
+> integralmente (75/75) graças ao type stripping nativo do Node (≥ 22.6).
+> Na suíte de integração, 2 asserções ficaram **desatualizadas em relação ao
+> comportamento aprovado** (não relacionadas ao TypeScript): a contagem do fake
+> de importação espera 61 registros, mas a regra definitiva §21 ignora a linha
+> sem diretor (60 inseridos); e a asserção de matriz do Hesdras depende do
+> nível atual do banco real (dados de produção mudaram). Build e typecheck não
+> são afetados.
 
 - **Unitários (66)**: validação de arquivo, hash SHA-256, caminho/nome do Storage, detecção dinâmica de períodos e indicadores no `exemplo-planilha.xlsx`, campos obrigatórios ausentes, duplicidades, classificação de hash duplicado, **modelo dos dashboards** (ordenação, métricas EAV→nomes amigáveis, agregados, cascata regional→diretor, rótulos compostos, contrato `metricas`, `recordMetric`, `buildRadarSeries`, **contagem definitiva de diretores/unidades** e **abreviação dos rótulos de períodos**), **evolução mensal individual** (`parseMonthHeader`, `buildMonthlyLabelMap`, `buildDirectorMonthlyEvolution`) e **vínculo/exibição das observações** (`resolveObservacaoVinculo`, `observacaoFiltros`, `observacaoVisivel`, `validarObservacao`, `formatarDataHora` — inclui "observação de Hesdras nunca aparece para Gregorio/Cilene").
 - **Integração (11)**: divididos para **nunca deixar dados permanentes** no Supabase real:
@@ -167,16 +192,16 @@ Os dashboards **não usam mais dados locais**: `src/data/initialRows.json` foi r
 
 - **Fonte**: avaliações com `status = 'publicada'` — todas aparecem **simultaneamente** para comparação (nenhum filtro obrigatório por avaliação).
 - **Carregamento**: no mount do app e **após cada publicação**; como tudo vem do Supabase, a tela **persiste após F5**.
-- **Consultas eficientes** (`dashboardService.js`): 1 requisição de avaliações + lotes de 20 avaliações para registros (páginas de 500) + lotes de 100 `registro_id` para períodos/indicadores — nunca uma requisição por registro. `dados_originais` (jsonb) **não** é baixado.
+- **Consultas eficientes** (`dashboardService.ts`): 1 requisição de avaliações + lotes de 20 avaliações para registros (páginas de 500) + lotes de 100 `registro_id` para períodos/indicadores — nunca uma requisição por registro. `dados_originais` (jsonb) **não** é baixado.
 - **Filtros em cascata (sem “Nível de análise”)**: a lateral tem apenas **Regional** e **Diretor**. Estados: todas + todos = consolidado geral · regional + todos = consolidado regional · regional + diretor = perfil individual. Trocar a regional limpa o diretor; o diretor fica desabilitado sem regional; “Todos os diretores” nunca conta como diretor. **Sem filtro de unidade** (unidade aparece em tabelas/detalhes). Títulos automáticos: “Desempenho geral” / “Desempenho da regional” / “Perfil do diretor”.
-- **Contagens de quantidade**: KPIs, resumo lateral e cartões por avaliação usam a função única `countDistinctNames` (`dashboardService.js`) — descarta nulos, vazios e marcadores técnicos ("Diretor não informado", "Unidade não informada"), ignora espaços extras e maiúsculas; **nunca** conta nº de registros. Com a planilha real: **60 diretores** e **60 unidades** (61 registros − 1 marcador).
-- **Comparações**: por avaliação (título · Ttri/ano · nome real do arquivo · diretores · unidades · nível médio); seleção vs consolidado geral (radar); e **“Evolução mensal do nível de desenvolvimento”** — **uma única série** (o diretor selecionado; sem consolidado regional nem consolidado geral), eixo X **mensal, pelos cabeçalhos REAIS da planilha** reconhecidos por `parseMonthHeader`/`buildMonthlyLabelMap`/`buildDirectorMonthlyEvolution` (`dashboardService.js`): nome de mês (`JULHO`), data (`JAN DE 2026`, `01/01/2026`) e fechamento de trimestre (`2TRI/25`, `SET/3TRI`, `MAR/1TRI 2026`) viram `MES/AAAA` — com a planilha atual exibe exatamente 16 meses (`JUN/2025` … `SET/2026`), nunca além de SET/2026 e **sem nenhum rótulo `/85` ou data inventada** (ano ausente é inferido na ordem cronológica; ano fora da janela das avaliações é descartado; ano nunca é lido de notas, percentuais ou valores de células). O gráfico **começa no primeiro mês com status ou nível válido daquele diretor** (meses anteriores ficam ocultos) e segue até o último período real da avaliação; lacuna posterior mantém o mês no eixo **sem ponto, sem zero e sem repetição do valor** (linha interrompida). Fechamentos trimestrais usam **marcador dourado maior com contorno**, rótulo “Nº trimestre de AAAA” abaixo do mês e um único ponto. Conversão de níveis via `romanLevel` com **correspondência exata** (mapa I–V, sem reconhecimento parcial de IV como I ou V); **largura responsiva** — `ResizeObserver` mede o container e o gap entre pontos é recalculado dinamicamente para ocupar toda a largura do card (sem rolagem horizontal em resoluções ≥ ~700 px); algarismo romano fixo acima de cada ponto, ausência = quebra na linha (nunca 0) e tooltip com mês/ano por extenso, estágio, nível de desenvolvimento em romano e fechamento de trimestre (§16).
+- **Contagens de quantidade**: KPIs, resumo lateral e cartões por avaliação usam a função única `countDistinctNames` (`dashboardService.ts`) — descarta nulos, vazios e marcadores técnicos ("Diretor não informado", "Unidade não informada"), ignora espaços extras e maiúsculas; **nunca** conta nº de registros. Com a planilha real: **60 diretores** e **60 unidades** (61 registros − 1 marcador).
+- **Comparações**: por avaliação (título · Ttri/ano · nome real do arquivo · diretores · unidades · nível médio); seleção vs consolidado geral (radar); e **“Evolução mensal do nível de desenvolvimento”** — **uma única série** (o diretor selecionado; sem consolidado regional nem consolidado geral), eixo X **mensal, pelos cabeçalhos REAIS da planilha** reconhecidos por `parseMonthHeader`/`buildMonthlyLabelMap`/`buildDirectorMonthlyEvolution` (`dashboardService.ts`): nome de mês (`JULHO`), data (`JAN DE 2026`, `01/01/2026`) e fechamento de trimestre (`2TRI/25`, `SET/3TRI`, `MAR/1TRI 2026`) viram `MES/AAAA` — com a planilha atual exibe exatamente 16 meses (`JUN/2025` … `SET/2026`), nunca além de SET/2026 e **sem nenhum rótulo `/85` ou data inventada** (ano ausente é inferido na ordem cronológica; ano fora da janela das avaliações é descartado; ano nunca é lido de notas, percentuais ou valores de células). O gráfico **começa no primeiro mês com status ou nível válido daquele diretor** (meses anteriores ficam ocultos) e segue até o último período real da avaliação; lacuna posterior mantém o mês no eixo **sem ponto, sem zero e sem repetição do valor** (linha interrompida). Fechamentos trimestrais usam **marcador dourado maior com contorno**, rótulo “Nº trimestre de AAAA” abaixo do mês e um único ponto. Conversão de níveis via `romanLevel` com **correspondência exata** (mapa I–V, sem reconhecimento parcial de IV como I ou V); **largura responsiva** — `ResizeObserver` mede o container e o gap entre pontos é recalculado dinamicamente para ocupar toda a largura do card (sem rolagem horizontal em resoluções ≥ ~700 px); algarismo romano fixo acima de cada ponto, ausência = quebra na linha (nunca 0) e tooltip com mês/ano por extenso, estágio, nível de desenvolvimento em romano e fechamento de trimestre (§16).
 - **Layout**: **uma única rolagem vertical** da página; lateral simplificada (marca, atualização pela planilha, Regional, Diretor, resumo da seleção — **sem o bloco antigo de observações**, ver §17); blocos empilhados em largura total, nesta ordem: **Pareceres (dois cards no topo, somente com diretor selecionado) → Histórico das avaliações → Evolução mensal do nível de desenvolvimento (somente com diretor selecionado) → Comparação de desempenho → Indicadores → Matriz histórica de desempenho**; card de evolução com ~420–430px no desktop e ~400–410px no notebook (altura responsiva no celular), radar mantido em ~430px no desktop (~380px no mobile); radar ampliado e centralizado com legenda abaixo.
-- **Matriz histórica de desempenho** (`src/components/PerformanceMatrix.jsx`): substitui a antiga “Detalhes da seleção” e reproduz a planilha original. Colunas congeladas (Regional · Diretor · Unidade) com rolagem horizontal; **histórico dinâmico** — cada período armazenado vira duas colunas (Status = `periodo.estagio` · Nível = `periodo.nivel`), em ordem (avaliação, `ordem`), rótulo composto quando repetido entre avaliações; **bloco final** separado (Status de gestão = `statusGestao` · Ciclo de vida = `cicloVida` · Nível da unidade = `nivelAtual`) seguido dos 9 indicadores (EAV amigável; ausência = “—”, nunca 0) e de indicadores extras futuros em dinâmico. **8 filtros locais** combinados por AND (Regional, Diretor, Unidade, Período, Status trimestral, Nível, Status de gestão, Ciclo de vida) + “Limpar filtros” + contador “X de Y registros”; o filtro **Período** delimita a casca em que Status trimestral/Nível valem. Helpers puros testáveis em `dashboardService.js` (`matrixPeriodColumns`, `filterMatrixRows`, `formatMetricCell`, `MATRIX_INDICATORS`). Sem mapa de calor nesta etapa.
-- **Estados de tela**: carregando; erro de consulta (com “Tentar novamente”); **vazio informativo** quando não há avaliação publicada; **Error Boundary** (`src/components/ErrorBoundary.jsx`) envolvendo a área principal — um erro de renderização (ex.: gráfico falhando com dados inesperados) mostra um estado de erro recuperável em vez de derrubar o app.
+- **Matriz histórica de desempenho** (`src/features/matriz/PerformanceMatrix.tsx`): substitui a antiga “Detalhes da seleção” e reproduz a planilha original. Colunas congeladas (Regional · Diretor · Unidade) com rolagem horizontal; **histórico dinâmico** — cada período armazenado vira duas colunas (Status = `periodo.estagio` · Nível = `periodo.nivel`), em ordem (avaliação, `ordem`), rótulo composto quando repetido entre avaliações; **bloco final** separado (Status de gestão = `statusGestao` · Ciclo de vida = `cicloVida` · Nível da unidade = `nivelAtual`) seguido dos 9 indicadores (EAV amigável; ausência = “—”, nunca 0) e de indicadores extras futuros em dinâmico. **8 filtros locais** combinados por AND (Regional, Diretor, Unidade, Período, Status trimestral, Nível, Status de gestão, Ciclo de vida) + “Limpar filtros” + contador “X de Y registros”; o filtro **Período** delimita a casca em que Status trimestral/Nível valem. Helpers puros testáveis em `dashboardService.ts` (`matrixPeriodColumns`, `filterMatrixRows`, `formatMetricCell`, `MATRIX_INDICATORS`). Sem mapa de calor nesta etapa.
+- **Estados de tela**: carregando; erro de consulta (com “Tentar novamente”); **vazio informativo** quando não há avaliação publicada; **Error Boundary** (`src/components/ErrorBoundary.tsx`) envolvendo a área principal — um erro de renderização (ex.: gráfico falhando com dados inesperados) mostra um estado de erro recuperável em vez de derrubar o app.
 - **Contrato de métricas**: o modelo do Supabase expõe `metricas` (português); os gráficos leem `r?.metricas?.[n]` com acesso defensivo a `null`/`undefined`.
-- **Textos da interface**: sem nomes técnicos de banco/auth na tela (“Supabase”, “login”, “anon”, “publicadas”, “Planilha1”, nomes de variáveis); erros vindos do parser/serviços são traduzidos na exibição pelo helper `humanError` (em `App.jsx` e `ImportDialog.jsx`). O selo “1 avaliação disponível” / “X avaliações disponíveis” no topo **foi removido em 2026-10-15** (ver §17).
-- **Observações (CRUD completo no banco, vinculadas ao diretor)**: salvas em `avaliacoes_diretores_observacoes` via `observacoesService.js`; **localStorage removido**. **Regra definitiva**: a observação é registrada pelo regional, mas **vinculada exclusivamente ao diretor selecionado** dentro da avaliação correspondente — e **somente é exibida quando o mesmo diretor está selecionado** (nunca para outro diretor da mesma regional). O formulário e a lista ("Observação do regional" / "Observações do regional") só existem com **regional + diretor** selecionados: sem regional a mensagem é "Selecione uma regional e um diretor para registrar ou consultar observações."; com regional e sem diretor é "Selecione um diretor para registrar ou consultar observações." (campo desabilitado, **Salvar observação** desabilitado e lista oculta nos dois casos). Criar: valida texto + regional + diretor → localiza o vínculo (avaliação mais recente em que o diretor tem registro + `registro_id`) → insere com `escopo='diretor'`, `avaliacao_id`, `registro_id`, `regional`, `diretor`, `criado_por`/`atualizado_por` `NULL` → aguarda confirmação do banco → limpa campo → "Observação salva com sucesso." → recarrega lista. Listar: prioridade `registro_id` → `avaliacao_id` → `escopo='diretor'` → não arquivadas, com regional e diretor como confirmação; **nunca consulta somente pela regional**; troca de regional/diretor limpa a lista na hora e descarta respostas atrasadas (token de requisição). Cada cartão mostra **diretor, regional, avaliação (ex.: 3º tri/2026), data/horário, texto, Editar e Excluir**; lista ordenada por data decrescente com as 3 mais recentes e "Ver todas". Editar: atualiza só `observacao` + `updated_at` pelo id (**vínculo preservado**) → "Observação atualizada com sucesso.". Excluir: exclusão lógica (`arquivada_em`; `DELETE` físico bloqueado no RLS) → "Observação excluída com sucesso."; arquivadas não aparecem. Persiste após F5 (dados no banco). **Atualização (2026-10-15)**: o formulário e a lista deixaram de existir na lateral e foram substituídos pela **área de Pareceres** do topo (§17) — o serviço, o vínculo (`resolveObservacaoVinculo`) e os dados do banco permanecem intactos; linhas legadas com `tipo = NULL` continuam sendo “observações” e não aparecem nos cards de parecer.
+- **Textos da interface**: sem nomes técnicos de banco/auth na tela (“Supabase”, “login”, “anon”, “publicadas”, “Planilha1”, nomes de variáveis); erros vindos do parser/serviços são traduzidos na exibição pelo helper `humanError` (em `App.tsx` e `ImportDialog.tsx`). O selo “1 avaliação disponível” / “X avaliações disponíveis” no topo **foi removido em 2026-10-15** (ver §17).
+- **Observações (CRUD completo no banco, vinculadas ao diretor)**: salvas em `avaliacoes_diretores_observacoes` via `observacoesService.ts`; **localStorage removido**. **Regra definitiva**: a observação é registrada pelo regional, mas **vinculada exclusivamente ao diretor selecionado** dentro da avaliação correspondente — e **somente é exibida quando o mesmo diretor está selecionado** (nunca para outro diretor da mesma regional). O formulário e a lista ("Observação do regional" / "Observações do regional") só existem com **regional + diretor** selecionados: sem regional a mensagem é "Selecione uma regional e um diretor para registrar ou consultar observações."; com regional e sem diretor é "Selecione um diretor para registrar ou consultar observações." (campo desabilitado, **Salvar observação** desabilitado e lista oculta nos dois casos). Criar: valida texto + regional + diretor → localiza o vínculo (avaliação mais recente em que o diretor tem registro + `registro_id`) → insere com `escopo='diretor'`, `avaliacao_id`, `registro_id`, `regional`, `diretor`, `criado_por`/`atualizado_por` `NULL` → aguarda confirmação do banco → limpa campo → "Observação salva com sucesso." → recarrega lista. Listar: prioridade `registro_id` → `avaliacao_id` → `escopo='diretor'` → não arquivadas, com regional e diretor como confirmação; **nunca consulta somente pela regional**; troca de regional/diretor limpa a lista na hora e descarta respostas atrasadas (token de requisição). Cada cartão mostra **diretor, regional, avaliação (ex.: 3º tri/2026), data/horário, texto, Editar e Excluir**; lista ordenada por data decrescente com as 3 mais recentes e "Ver todas". Editar: atualiza só `observacao` + `updated_at` pelo id (**vínculo preservado**) → "Observação atualizada com sucesso.". Excluir: exclusão lógica (`arquivada_em`; `DELETE` físico bloqueado no RLS) → "Observação excluída com sucesso."; arquivadas não aparecem. Persiste após F5 (dados no banco). **Atualização (2026-10-15)**: o formulário e a lista deixaram de existir na lateral e foram substituídos pela **área de Pareceres** do topo (§17) — o serviço, o vínculo (`resolveObservacaoVinculo`) e os dados do banco permanecem intactos; linhas legadas com `tipo = NULL` continuam sendo “observações” e não aparecem nos cards de parecer.
 
 ---
 
@@ -236,8 +261,8 @@ Fundo: `background-size: cover`, `background-position: center`, `background-repe
 ### 10.5 Arquivos alterados
 
 - `index.html` — favicon + `theme-color` `#294b5b`.
-- `src/App.jsx` — cabeçalho da lateral com `<img class="brand-logo">` + título “Matriz de Desenvolvimento” e subtítulo “Avaliação de desempenho dos diretores” (nenhum sino, ícone de usuário ou saída).
-- `src/styles.css` — nova seção “PERSONALIZAÇÃO VISUAL” (fundo, lateral 3D, logo, botões, filtros, cards, responsividade, acessibilidade).
+- `src/app/App.tsx` — cabeçalho da lateral com `<img class="brand-logo">` + título “Matriz de Desenvolvimento” e subtítulo “Avaliação de desempenho dos diretores” (nenhum sino, ícone de usuário ou saída).
+- `src/styles/styles.css` — nova seção “PERSONALIZAÇÃO VISUAL” (fundo, lateral 3D, logo, botões, filtros, cards, responsividade, acessibilidade).
 - Assets já existentes em `public/assets/` (não modificados).
 
 ### 10.6 Testes realizados
@@ -284,7 +309,7 @@ O gráfico trimestral foi substituído por uma **linha do tempo mensal individua
 - **Fechamentos trimestrais**: JUN/2025, SET/2025, DEZ/2025, MAR/2026, JUN/2026 e SET/2026 recebem **marcador dourado, maior e com contorno** (meses comuns ficam azul-petróleo), o rótulo **“Nº trimestre de AAAA”** (ex.: “3º trimestre de 2026”) logo abaixo do mês e **um único ponto** — não existe segundo ponto para o trimestre.
 - **Apresentação** (revisada em 2026-10-15, detalhes no §16): título **“Evolução mensal do nível de desenvolvimento”** + subtítulo **“Progressão do diretor entre os níveis I e V ao longo dos meses avaliados.”** + explicação **“Os níveis representam a classificação de desenvolvimento registrada na planilha e não correspondem às notas dos indicadores.”**; eixo Y rotulado **Nível I … Nível V** (sem números arábicos); **algarismo romano fixo sobre cada ponto válido**; eixo X em `MES/AAAA` (ex.: SET/2026); tooltip com **mês/ano por extenso**, **estágio do período**, **nível de desenvolvimento em romano** e **fechamento do trimestre quando aplicável**; legenda apenas **“Período mensal”** e **“Fechamento trimestral”**.
 - **Leitura dos dados**: exclusivamente o `status` (estágio) e o `nível` do **período correspondente** — nunca status de gestão da unidade, ciclo de vida, nível da unidade, indicadores finais ou valores de outro mês. Níveis convertem por **correspondência exata** `I=1 … V=5` (removidos parênteses/espaços); valor vazio, inválido ou “Não informado” → `null`.
-- **Implementação**: helpers puros em `dashboardService.js` (`parseMonthHeader`, `buildMonthlyLabelMap`, `buildDirectorMonthlyEvolution`) + componente `MonthlyEvolutionChart` em `src/components/Charts.jsx`. `parseQuarterHeader`/`buildQuarterLabelMap` permanecem intactos (testes e demais usos).
+- **Implementação**: helpers puros em `dashboardService.ts` (`parseMonthHeader`, `buildMonthlyLabelMap`, `buildDirectorMonthlyEvolution`) + componente `MonthlyEvolutionChart` em `src/features/dashboard/Charts.tsx`. `parseQuarterHeader`/`buildQuarterLabelMap` permanecem intactos (testes e demais usos).
 
 Testes: `npm test` ✅ **54/54** · `npm run build` ✅ · render de fumaça do SVG com a planilha real (16 rótulos do eixo, 15 pontos para 15 valores, 6 subrótulos de trimestre, mês da lacuna no eixo sem ponto, nenhum `/85`).
 
@@ -338,15 +363,15 @@ Correção da regra de vínculo, salvamento e exibição das observações do re
 
 Títulos **"Observação do regional"** e **"Observações do regional"** mantidos (apenas caixa alta via CSS). A edição altera somente o texto (vínculo intacto); a exclusão é lógica (`arquivada_em`) e o `DELETE` físico continua bloqueado no RLS.
 
-> **Descontinuado em 2026-10-15 (ver §17):** o formulário e a lista deixaram de existir na lateral — a interface acima descreve o comportamento vigente até essa data. O serviço (`observacoesService.js`) permanece e é reaproveitado pela área de pareceres.
+> **Descontinuado em 2026-10-15 (ver §17):** o formulário e a lista deixaram de existir na lateral — a interface acima descreve o comportamento vigente até essa data. O serviço (`observacoesService.ts`) permanece e é reaproveitado pela área de pareceres.
 
 ### 14.5 Arquivos alterados
 
 | Arquivo | Mudança |
 | --- | --- |
-| `src/services/observacoesService.js` | `createObservacao` exige regional/diretor e força `escopo='diretor'`; `listObservacoesDiretor` recebe `registroId`/`avaliacaoId`; **removida** `listObservacoesRegional` (consulta só por regional); helpers puros `validarObservacao`, `resolveObservacaoVinculo`, `observacaoFiltros`, `observacaoVisivel`, `formatarDataHora` |
-| `src/App.jsx` | formulário/lista condicionados a regional+diretor; vínculo via `resolveObservacaoVinculo`; token anti-resposta-atrasada; cartões com diretor/regional/avaliação/data; mensagens com ponto final |
-| `src/styles.css` | `.obs-meta` com `flex-wrap` (4 itens no cartão) |
+| `src/services/observacoesService.ts` | `createObservacao` exige regional/diretor e força `escopo='diretor'`; `listObservacoesDiretor` recebe `registroId`/`avaliacaoId`; **removida** `listObservacoesRegional` (consulta só por regional); helpers puros `validarObservacao`, `resolveObservacaoVinculo`, `observacaoFiltros`, `observacaoVisivel`, `formatarDataHora` |
+| `src/app/App.tsx` | formulário/lista condicionados a regional+diretor; vínculo via `resolveObservacaoVinculo`; token anti-resposta-atrasada; cartões com diretor/regional/avaliação/data; mensagens com ponto final |
+| `src/styles/styles.css` | `.obs-meta` com `flex-wrap` (4 itens no cartão) |
 | `tests/unit/observacoesVinculo.test.mjs` | **novo** — 12 testes de vínculo/filtros/visibilidade/validação |
 
 ### 14.6 Validações
@@ -386,7 +411,7 @@ Gerenciador de pacotes: **npm** (único lock versionado: `package-lock.json`; ne
 | `VITE_SUPABASE_URL` | URL do projeto (`https://<ref>.supabase.co`) |
 | `VITE_SUPABASE_ANON_KEY` | chave **publicável** (anon/publishable). **Nunca** `service_role` |
 
-- Lidas no frontend via `import.meta.env` (`src/services/supabaseClient.js`); o acesso a `process.env` no cliente existe apenas como ramo inalcançável no navegador, para os testes de integração em Node.
+- Lidas no frontend via `import.meta.env` (`src/services/supabaseClient.ts`); o acesso a `process.env` no cliente existe apenas como ramo inalcançável no navegador, para os testes de integração em Node.
 - `.env.example` versionado com placeholders (sem valores reais); `.env` real fica fora do Git.
 - Na Vercel: configurar nos ambientes **Production**, **Preview** e (quando necessário) **Development**.
 - Sem variáveis definidas, a aplicação mostra mensagem clara de configuração ausente (nunca tela branca, nunca dados de exemplo automáticos).
@@ -395,7 +420,7 @@ Gerenciador de pacotes: **npm** (único lock versionado: `package-lock.json`; ne
 
 `node_modules/` · `dist/` · `.vite/` · `.vercel/` · `.env` e `.env.*.local` (mantendo `!.env.example`) · `*.log` · `.DS_Store` · `Thumbs.db` · `opencode.json` · `.sisyphus/` · `.secrets/` · `*.local.json`.
 
-Versionados: `package.json` + `package-lock.json` · `vite.config.js` · `vercel.json` · `.env.example` · `index.html` · `src/` · `public/assets/*.png` · `tests/` (inclui `tests/fixtures/exemplo-planilha.xlsx`) · `supabase/migrations/` · `docs/` · `README.md`.
+Versionados: `package.json` + `package-lock.json` · `vite.config.ts` · `vercel.json` · `.env.example` · `index.html` · `src/` · `scripts/check-src-js.mjs` · `public/assets/*.png` · `tests/` (inclui `tests/fixtures/exemplo-planilha.xlsx`) · `supabase/migrations/` · `docs/` · `README.md`.
 
 ### 15.5 `vercel.json` (rotas SPA + cabeçalhos)
 
@@ -407,8 +432,8 @@ Versionados: `package.json` + `package-lock.json` · `vite.config.js` · `vercel
 
 | Arquivo | Uso |
 | --- | --- |
-| `public/assets/background-topografico.png` | fundo topográfico (`src/styles.css`) |
-| `public/assets/logo-diretores.png` | logo da lateral (`src/App.jsx`) e **favicon** (`index.html`) |
+| `public/assets/background-topografico.png` | fundo topográfico (`src/styles/styles.css`) |
+| `public/assets/logo-diretores.png` | logo da lateral (`src/app/App.tsx`) e **favicon** (`index.html`) |
 
 Ambos são copiados para `dist/assets/` no build e versionados. Nenhuma planilha real entra no bundle nem em `public/` — a planilha de exemplo foi movida para `tests/fixtures/exemplo-planilha.xlsx` (fixture de teste automatizado; planilhas operacionais do usuário ficam apenas no Storage).
 
@@ -484,9 +509,9 @@ Card oculto em “Todos os diretores”; visível só com diretor específico; u
 
 | Arquivo | O que mudou |
 |---|---|
-| `src/App.jsx` | Título, subtítulo, explicação e legenda do card; classe `evolution-card` para escopar o CSS |
-| `src/components/Charts.jsx` | Eixo Y “Nível I…V”, rótulos romanos nos pontos, marcadores maiores + área de interação, tooltip HTML próprio (mês por extenso / estágio / nível romano / trimestre), altura medida por `ResizeObserver` (largura **e** altura, já sem a barra de rolagem), largura/altura inline do SVG, `PAD=72`, posições de mês e trimestre |
-| `src/styles.css` | Bloco `.evolution-card` (fontes, cores, linha 3,5px, marcadores, alturas 280/262/300px, legenda), `.chart-tip`, peso 500 no Inter |
+| `src/app/App.tsx` | Título, subtítulo, explicação e legenda do card; classe `evolution-card` para escopar o CSS |
+| `src/features/dashboard/Charts.tsx` | Eixo Y “Nível I…V”, rótulos romanos nos pontos, marcadores maiores + área de interação, tooltip HTML próprio (mês por extenso / estágio / nível romano / trimestre), altura medida por `ResizeObserver` (largura **e** altura, já sem a barra de rolagem), largura/altura inline do SVG, `PAD=72`, posições de mês e trimestre |
+| `src/styles/styles.css` | Bloco `.evolution-card` (fontes, cores, linha 3,5px, marcadores, alturas 280/262/300px, legenda), `.chart-tip`, peso 500 no Inter |
 | `docs/DOCUMENTACAO_AVALIACAO_DIRETORES.md` | §12 (apresentação, layout) + este §16 |
 
 ### 16.7 Resultado dos testes e build (2026-10-15)
@@ -542,11 +567,11 @@ Textos da interface: “Parecer do Regional” · “Parecer de Operações” �
 | Arquivo | Mudança |
 |---|---|
 | `supabase/migrations/20261015100000_avaliacoes_diretores_observacoes_tipo_parecer.sql` | **novo** — coluna `tipo` + constraint + índice (aplicada no banco) |
-| `src/services/pareceresService.js` | **novo** — `TIPOS_PARECER`, `TIPO_LABEL`, `ehTipoParecer`, `validarParecer`, `parecerFiltros`, `parecerPertence`, `parecerVisivel`, `parecerMaisRecente`, `parecerEditado`, `listPareceres`, `createParecer`, `updateParecer`, `archiveParecer` |
-| `src/services/observacoesService.js` | `observacaoFiltros`/`observacaoVisivel` passam a **ignorar linhas com `tipo` preenchido** (pareceres nunca aparecem na lista antiga de observações) |
-| `src/components/Pareceres.jsx` | **novo** — os dois cards, carregamento automático, editor (novo/editar), histórico por tipo, exclusão com `ConfirmModal` e clamp de 6 linhas |
-| `src/App.jsx` | import/render de `<Pareceres/>` antes dos indicadores; remoção do selo, do bloco de observações da lateral, dos estados/funções associados e do `ConfirmModal` do app |
-| `src/styles.css` | remoção das regras `.badge` e das regras mortas `.obs-*`; novos estilos `.parecer-*`/`.hist-*` (inclui `@media(max-width:900px)` para empilhar os cards); `.sidebar` com `height:auto` + `max-height` |
+| `src/services/pareceresService.ts` | **novo** — `TIPOS_PARECER`, `TIPO_LABEL`, `ehTipoParecer`, `validarParecer`, `parecerFiltros`, `parecerPertence`, `parecerVisivel`, `parecerMaisRecente`, `parecerEditado`, `listPareceres`, `createParecer`, `updateParecer`, `archiveParecer` |
+| `src/services/observacoesService.ts` | `observacaoFiltros`/`observacaoVisivel` passam a **ignorar linhas com `tipo` preenchido** (pareceres nunca aparecem na lista antiga de observações) |
+| `src/features/pareceres/Pareceres.tsx` | **novo** — os dois cards, carregamento automático, editor (novo/editar), histórico por tipo, exclusão com `ConfirmModal` e clamp de 6 linhas |
+| `src/app/App.tsx` | import/render de `<Pareceres/>` antes dos indicadores; remoção do selo, do bloco de observações da lateral, dos estados/funções associados e do `ConfirmModal` do app |
+| `src/styles/styles.css` | remoção das regras `.badge` e das regras mortas `.obs-*`; novos estilos `.parecer-*`/`.hist-*` (inclui `@media(max-width:900px)` para empilhar os cards); `.sidebar` com `height:auto` + `max-height` |
 | `tests/unit/pareceres.test.mjs` | **novo** — regras puras (tipos, validação, filtros, visibilidade/pertencimento, mais recente, edição) |
 
 ### 17.5 Validações
@@ -569,7 +594,7 @@ Depois que o usuário seleciona uma planilha em “Atualizar pela planilha”, o
 
 1. **Seleção do arquivo** → validação de extensão (.xlsx/.xls), tamanho (até 15 MB) e aba `Planilha1` (como antes).
 2. **Análise local** da planilha em memória (nada de rede além da consulta de hash) + **hash SHA-256** consultado no banco apenas para reconhecer arquivo já importado.
-3. **Comparação** com o modelo atual (períodos, diretores, unidades, ajustes manuais) montada por `src/services/previewService.js` (`buildUpdatePreview`) — função pura, sem gravação. Desde a regra definitiva (§21), o coração da prévia é **a mesma função `planejarAtualizacao`** (`src/services/importPlan.js`) que a gravação executa.
+3. **Comparação** com o modelo atual (períodos, diretores, unidades, ajustes manuais) montada por `src/services/previewService.ts` (`buildUpdatePreview`) — função pura, sem gravação. Desde a regra definitiva (§21), o coração da prévia é **a mesma função `planejarAtualizacao`** (`src/services/importPlan.ts`) que a gravação executa.
 4. **Prévia aberta** com as seções abaixo; os botões são **Cancelar** e **Confirmar atualização**.
 5. **Confirmar atualização** abre um resumo final em modal (registros novos/reutilizados/reativados/arquivados/ignorados, períodos novos, campos a completar, divergências mantidas, ajustes preservados, notas/indicadores, novas Regionais/diretores/unidades e pendências permitidas); só após “Sim, atualizar” roda `runImport` (agora orientado pelo plano — §21).
 6. **Cancelar** fecha a prévia sem enviar arquivo, sem tocar no banco e sem afetar gráficos/indicadores.
@@ -613,12 +638,12 @@ O hash SHA-256 passa a ser calculado **antes** da confirmação: se o arquivo fo
 
 | Arquivo | Mudança |
 |---|---|
-| `src/services/previewService.js` | **novo** — `buildUpdatePreview` (comparação pura planilha × sistema) e `chavePeriodo`; nesta etapa: seções finalizadas, contagem de períodos identificados, registros preservados, Regionais novas, referência atual × nova e alertas de Status/Nível |
-| `src/components/ImportDialog.jsx` | reescrito como **prévia + resumo final de confirmação** (mantém `runImport`, metadados e tela de sucesso) |
-| `src/App.jsx` | `upload()` calcula o hash e consulta arquivos idênticos (leitura) antes de abrir a prévia; `ImportDialog` recebe `model` e `arquivosIguais` |
-| `src/services/importService.js` | **somente acompanhamento de progresso**: estágios `Atualizando períodos`, `Atualizando indicadores` e `Atualizando cadastros` (nenhuma alteração no que é gravado nem na ordem) |
-| `src/dataParser.js` | aditivo: `invalidMetricCells` (célula de indicador não numérica) para o alerta “indicador inválido” |
-| `src/styles.css` | estilos aditivos `.pv-*` das seções da prévia |
+| `src/services/previewService.ts` | **novo** — `buildUpdatePreview` (comparação pura planilha × sistema) e `chavePeriodo`; nesta etapa: seções finalizadas, contagem de períodos identificados, registros preservados, Regionais novas, referência atual × nova e alertas de Status/Nível |
+| `src/features/importacao/ImportDialog.tsx` | reescrito como **prévia + resumo final de confirmação** (mantém `runImport`, metadados e tela de sucesso) |
+| `src/app/App.tsx` | `upload()` calcula o hash e consulta arquivos idênticos (leitura) antes de abrir a prévia; `ImportDialog` recebe `model` e `arquivosIguais` |
+| `src/services/importService.ts` | **somente acompanhamento de progresso**: estágios `Atualizando períodos`, `Atualizando indicadores` e `Atualizando cadastros` (nenhuma alteração no que é gravado nem na ordem) |
+| `src/lib/dataParser.ts` | aditivo: `invalidMetricCells` (célula de indicador não numérica) para o alerta “indicador inválido” |
+| `src/styles/styles.css` | estilos aditivos `.pv-*` das seções da prévia |
 
 ### 18.8 Pendência: teste definitivo com a próxima planilha real
 
@@ -648,16 +673,16 @@ O botão **Atualizar dados** da Matriz histórica (visível apenas com um direto
 | Arquivo | Mudança |
 |---|---|
 | `supabase/migrations/20261016140000_avaliacoes_diretores_indicadores_ajustes.sql` | **novo** — tabela + índice único parcial + RLS/privégios provisórios (aplicada no projeto) |
-| `src/services/indicadoresAjustesService.js` | **novo** — `CAMPOS_NOTA`/`CAMPOS_PERCENTUAL`, `parseValorIndicador`, `formatarEntradaIndicador`, `mesmoValorIndicador`, `salvarAjustesIndicadores` (atualiza a MESMA linha ativa; só grava campos alterados) |
-| `src/services/dashboardService.js` | busca `ajustesIndicadores` no carregamento; regra centralizada (`contextoDeAjustesIndicadores`, `metricasDoRegistro`), `metricasImportado`/`metricasInfo` nos registros e `aplicarAjusteIndicadorNoModelo` |
-| `src/components/PeriodosManuais.jsx` | seção "Pontuações e indicadores" (9 campos, prévia em chips, salvar pontuações) |
-| `src/App.jsx` | `aposSalvarPeriodo` com o caso `tipo: 'indicadores'` (atualiza o modelo e mostra a mensagem) |
-| `src/components/PerformanceMatrix.jsx` | texto do tooltip do botão "Atualizar dados" |
+| `src/services/indicadoresAjustesService.ts` | **novo** — `CAMPOS_NOTA`/`CAMPOS_PERCENTUAL`, `parseValorIndicador`, `formatarEntradaIndicador`, `mesmoValorIndicador`, `salvarAjustesIndicadores` (atualiza a MESMA linha ativa; só grava campos alterados) |
+| `src/services/dashboardService.ts` | busca `ajustesIndicadores` no carregamento; regra centralizada (`contextoDeAjustesIndicadores`, `metricasDoRegistro`), `metricasImportado`/`metricasInfo` nos registros e `aplicarAjusteIndicadorNoModelo` |
+| `src/features/matriz/PeriodosManuais.tsx` | seção "Pontuações e indicadores" (9 campos, prévia em chips, salvar pontuações) |
+| `src/app/App.tsx` | `aposSalvarPeriodo` com o caso `tipo: 'indicadores'` (atualiza o modelo e mostra a mensagem) |
+| `src/features/matriz/PerformanceMatrix.tsx` | texto do tooltip do botão "Atualizar dados" |
 | `docs/DOCUMENTACAO_AVALIACAO_DIRETORES.md` | esta seção |
 
 ### 19.4 Validações
 
-- Nenhum dado fictício foi gravado; nenhuma alteração em upload, pareceres, filtros, identidade visual ou no cadastro de Mês/Ano/Status/Nível aprovado; `src/styles.css` intocado (só classes CSS existentes).
+- Nenhum dado fictício foi gravado; nenhuma alteração em upload, pareceres, filtros, identidade visual ou no cadastro de Mês/Ano/Status/Nível aprovado; `src/styles/styles.css` intocado (só classes CSS existentes).
 - "Nota geral" vem **direto da coluna `GERAL`** da planilha (o parser não calcula): o sistema não inventa fórmula nova.
 - Conversões conferidas com os dados reais do banco: percentuais guardados como fração (ex.: Evasão média 0.1378 → 13,8%), notas numa escala observada de ~1,7 a ~5,4 (por isso sem faixa fixa de validação).
 - `npm run build` OK (`dist/assets/index-3eQUZHRT.js` 906,12 kB; apenas o aviso pré-existente de tamanho de chunk).
@@ -717,7 +742,7 @@ Exclusão na ordem correta (filhos → pais: ajustes, indicadores e observaçõe
 ### 20.5 Estado final verificado (2026-10-20)
 
 - **Zero** avaliações · **zero** registros (diretores/unidades) · **zero** períodos · **zero** indicadores · **zero** ajustes manuais (período e indicadores) · **zero** pareceres/observações · **zero** objetos no bucket · **zero** duplicidades.
-- Tela em **estado vazio informativo** ("zero avaliações publicadas") com o **botão de upload / "Atualizar pela planilha" disponível** — comportamento já previsto no `App.jsx` quando não há avaliação publicada; **nenhuma alteração de layout ou funcionalidade** foi feita.
+- Tela em **estado vazio informativo** ("zero avaliações publicadas") com o **botão de upload / "Atualizar pela planilha" disponível** — comportamento já previsto no `App.tsx` quando não há avaliação publicada; **nenhuma alteração de layout ou funcionalidade** foi feita.
 - **`npm run build` ✅** (`dist/` gerada; apenas o aviso pré-existente de chunks maiores que 500 kB).
 - **Não executado:** `git add`, `commit`, `push`, atualização do GitHub, acesso/deploy na Vercel e mudança de variáveis de ambiente.
 
@@ -729,7 +754,7 @@ Exclusão na ordem correta (filhos → pais: ajustes, indicadores e observaçõe
 
 ## 21. Regra definitiva de importação da Planilha1 — identidade, entidade e prioridades (2026-10-20)
 
-Esta seção é a **fonte canônica** da regra que vale a partir do primeiro upload pós-limpeza (§20). Implementação única: `src/services/importPlan.js` (função pura `planejarAtualizacao`), consumida **tanto pela prévia** (`buildUpdatePreview` em `previewService.js`) **quanto pela gravação** (`runImport` em `importService.js` sobre leitura fresca `carregarBaseImportacao()`); a tela nunca promete algo diferente do que será escrito. Bancariamente, a migration `20261020150000_avaliacoes_diretores_importacao_entidade.sql` (coluna `arquivado_em`, grants por coluna, políticas UPDATE e triggers de invariantes) sustenta a mesma regra como defesa em profundidade.
+Esta seção é a **fonte canônica** da regra que vale a partir do primeiro upload pós-limpeza (§20). Implementação única: `src/services/importPlan.ts` (função pura `planejarAtualizacao`), consumida **tanto pela prévia** (`buildUpdatePreview` em `previewService.ts`) **quanto pela gravação** (`runImport` em `importService.ts` sobre leitura fresca `carregarBaseImportacao()`); a tela nunca promete algo diferente do que será escrito. Bancariamente, a migration `20261020150000_avaliacoes_diretores_importacao_entidade.sql` (coluna `arquivado_em`, grants por coluna, políticas UPDATE e triggers de invariantes) sustenta a mesma regra como defesa em profundidade.
 
 ### 21.1 Regra de identidade
 
@@ -780,13 +805,13 @@ A prévia informa a contagem de cada ação e as pendências derivadas (conflito
 
 | Arquivo | Mudança |
 |---|---|
-| `src/services/importPlan.js` | **novo** — fonte única da regra (`planejarAtualizacao`, `chaveVinculo`, `chavePeriodo`, `statusLido`/`nivelLido`, `baseDoModelo`) |
-| `src/services/previewService.js` | prévia reconstruída sobre o plano (seções **Registros** e **Divergências**, bloqueio de arquivo idêntico por período, pendências de ignoradas/arquivados) |
-| `src/services/importService.js` | `runImport` passa a executar o **plano** (inserções + atualizações verificadas) em vez de inserção cega de snapshots |
-| `src/services/avaliacoesService.js` | `carregarBaseImportacao`, `updatePeriodo`, `updateIndicador`, `updateRegistrosEmLote` (agrupamento por patch + checagem de linhas retornadas/RLS) |
-| `src/services/dashboardService.js` | `buildDashboardModel` expõe `registrosArquivados`, `registros` ativos, registros com `arquivado` e indicadores com `id` |
-| `src/components/ImportDialog.jsx` | seções novas na prévia, resumo de confirmação e tela de sucesso com os totais reais do plano |
-| `src/App.jsx` | KPI/perfil “avaliações” = total publicado (registros são entidades reutilizadas — `avaliacao_id` não indica participação); “último período” usa a seleção atual |
+| `src/services/importPlan.ts` | **novo** — fonte única da regra (`planejarAtualizacao`, `chaveVinculo`, `chavePeriodo`, `statusLido`/`nivelLido`, `baseDoModelo`) |
+| `src/services/previewService.ts` | prévia reconstruída sobre o plano (seções **Registros** e **Divergências**, bloqueio de arquivo idêntico por período, pendências de ignoradas/arquivados) |
+| `src/services/importService.ts` | `runImport` passa a executar o **plano** (inserções + atualizações verificadas) em vez de inserção cega de snapshots |
+| `src/services/avaliacoesService.ts` | `carregarBaseImportacao`, `updatePeriodo`, `updateIndicador`, `updateRegistrosEmLote` (agrupamento por patch + checagem de linhas retornadas/RLS) |
+| `src/services/dashboardService.ts` | `buildDashboardModel` expõe `registrosArquivados`, `registros` ativos, registros com `arquivado` e indicadores com `id` |
+| `src/features/importacao/ImportDialog.tsx` | seções novas na prévia, resumo de confirmação e tela de sucesso com os totais reais do plano |
+| `src/app/App.tsx` | KPI/perfil “avaliações” = total publicado (registros são entidades reutilizadas — `avaliacao_id` não indica participação); “último período” usa a seleção atual |
 | `supabase/migrations/20261020150000_avaliacoes_diretores_importacao_entidade.sql` | **aplicada em 2026-10-20 via MCP do Supabase** — `arquivado_em`, grants UPDATE por coluna, políticas UPDATE (registros/indicadores/**periodos**), triggers de invariantes |
 | `tests/integration/fakeSupabase.mjs` | emulação de `.is(col, null)` (usado pela leitura fresca e pelos ajustes) |
 | `docs/MODELO_DADOS_AVALIACOES_DIRETORES.md` | §2.2–§2.4 e §5.2 atualizados com a coluna/políticas/triggers |
@@ -798,7 +823,7 @@ A prévia informa a contagem de cada ação e as pendências derivadas (conflito
 
 ### 21.8 Correção de incidente (2026-10-20) — dashboard não carregava
 
-- **Causa confirmada:** o console reportava `column avaliacoes_diretores_registros.arquivado_em does not exist` e as consultas ao Supabase retornavam HTTP 400. A migration `20261020150000_avaliacoes_diretores_importacao_entidade.sql` existia localmente, mas **não tinha sido aplicada** ao projeto Supabase conectado — a coluna `arquivado_em` (`timestamptz null`) não existia na tabela `public.avaliacoes_diretores_registros`, embora `dashboardService.js` já a consultasse no `SELECT`.
+- **Causa confirmada:** o console reportava `column avaliacoes_diretores_registros.arquivado_em does not exist` e as consultas ao Supabase retornavam HTTP 400. A migration `20261020150000_avaliacoes_diretores_importacao_entidade.sql` existia localmente, mas **não tinha sido aplicada** ao projeto Supabase conectado — a coluna `arquivado_em` (`timestamptz null`) não existia na tabela `public.avaliacoes_diretores_registros`, embora `dashboardService.ts` já a consultasse no `SELECT`.
 - **Correção:** a migration pendente foi aplicada diretamente no banco conectado **pelo MCP do Supabase** (sem migration duplicada). A migration é aditiva e idempotente (`ADD COLUMN IF NOT EXISTS`); cria a coluna, grants UPDATE por coluna para `anon`, políticas UPDATE (registros/indicadores/periodos) e triggers de invariantes.
 - **Preservação de dados:** nenhum registro foi apagado — os 61 registros existentes permanecem íntegros, todos com `arquivado_em = null` (nenhum arquivado automaticamente). Nenhuma outra tabela/módulo foi alterado.
 - **Verificações pós-aplicação (via MCP):** coluna `arquivado_em` existe com tipo `timestamptz`, aceita `null`; a consulta do dashboard (`SELECT ... arquivado_em ...`) retorna linhas sem HTTP 400; políticas RLS de SELECT para `anon`/`authenticated` permanecem ativas.

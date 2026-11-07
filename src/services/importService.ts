@@ -1,14 +1,14 @@
-import { computeSha256 } from './hashService.js';
-import { uploadPlanilha, buildStoragePath, contentTypeFor, STORAGE_BUCKET } from './storageService.js';
+import { computeSha256 } from './hashService.ts';
+import { uploadPlanilha, buildStoragePath, contentTypeFor, STORAGE_BUCKET } from './storageService.ts';
 import {
   findAvaliacoesByHash, classifyHashDuplicates, createAvaliacao, updateArquivoInfo,
   publishAvaliacao, markAvaliacaoErro, insertRegistros, insertPeriodos, insertIndicadores,
   carregarBaseImportacao, updatePeriodo, updateIndicador, updateRegistrosEmLote
-} from './avaliacoesService.js';
-import { planejarAtualizacao } from './importPlan.js';
+} from './avaliacoesService.ts';
+import { planejarAtualizacao } from './importPlan.ts';
 import type { WorkbookAnalysis } from '../types/planilha';
 import type { ResumoPlano } from '../types/importacao';
-import type { AvaliacaoHashInfo } from './avaliacoesService.js';
+import type { AvaliacaoHashInfo } from './avaliacoesService.ts';
 
 export const STAGES = {
   VALIDANDO: 'validando',
@@ -84,7 +84,7 @@ export interface RelatorioImportacao {
 }
 
 /**
- * Fluxo completo de importação com a REGRA DEFINITIVA (importPlan.js):
+ * Fluxo completo de importação com a REGRA DEFINITIVA (importPlan.ts):
  * identidade Diretor+Unidade reutiliza/arquiva/reativa registros; a planilha
  * só cria registro novo, insere período novo, completa campo vazio e atualiza
  * indicadores (exceto os protegidos por ajuste manual). O plano é recalculado

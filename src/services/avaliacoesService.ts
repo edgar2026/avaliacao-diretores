@@ -1,5 +1,5 @@
-import { getSupabase } from './supabaseClient.js';
-import { loadPublishedDashboard, buildDashboardModel } from './dashboardService.js';
+import { getSupabase } from './supabaseClient.ts';
+import { loadPublishedDashboard, buildDashboardModel } from './dashboardService.ts';
 import type { AvaliacaoRow } from '../types/supabase';
 import type { DashboardModel } from '../types/modelo';
 
@@ -128,7 +128,7 @@ export async function insertIndicadores(rows: Record<string, unknown>[]): Promis
 
 // ---------------------------------------------------------------------------
 // REGRA DEFINITIVA DE IMPORTAÇÃO — base fresca + gravação incremental
-// (identidade Diretor+Unidade; ver src/services/importPlan.js)
+// (identidade Diretor+Unidade; ver src/services/importPlan.ts)
 // ---------------------------------------------------------------------------
 
 /**

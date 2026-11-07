@@ -12,17 +12,17 @@ import { createFakeSupabase } from './fakeSupabase.mjs';
 // Substitui o cliente Supabase ANTES de importar os services, para que todos os
 // módulos (importService/avaliacoesService/storageService) usem o fake.
 const fake = createFakeSupabase();
-mock.module('../../src/services/supabaseClient.js', {
+mock.module('../../src/services/supabaseClient.ts', {
   exports: {
     getSupabase: () => fake,
     isSupabaseConfigured: () => true
   }
 });
 
-const { runImport } = await import('../../src/services/importService.js');
-const { analyzeWorkbookBuffer } = await import('../../src/dataParser.js');
-const { computeSha256 } = await import('../../src/services/hashService.js');
-const { STORAGE_BUCKET } = await import('../../src/services/storageService.js');
+const { runImport } = await import('../../src/services/importService.ts');
+const { analyzeWorkbookBuffer } = await import('../../src/lib/dataParser.ts');
+const { computeSha256 } = await import('../../src/services/hashService.ts');
+const { STORAGE_BUCKET } = await import('../../src/services/storageService.ts');
 
 const META = { titulo:'Teste automatizado — exemplo', trimestre:3, ano:2026 };
 const buffer = new Uint8Array(readFileSync(new URL('../fixtures/exemplo-planilha.xlsx', import.meta.url)));

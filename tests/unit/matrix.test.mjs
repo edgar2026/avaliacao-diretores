@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildDashboardModel, buildPeriodLabelMap, matrixPeriodColumns,
   filterMatrixRows, formatMetricCell, MATRIX_INDICATORS
-} from '../../src/services/dashboardService.js';
+} from '../../src/services/dashboardService.ts';
 
 const rawBase = () => ({
   avaliacoes: [

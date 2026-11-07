@@ -4,8 +4,8 @@
 import './loadEnv.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { getSupabase } from '../../src/services/supabaseClient.js';
-import { STORAGE_BUCKET } from '../../src/services/storageService.js';
+import { getSupabase } from '../../src/services/supabaseClient.ts';
+import { STORAGE_BUCKET } from '../../src/services/storageService.ts';
 
 const configured = Boolean(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL)
   && Boolean(process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY);

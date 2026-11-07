@@ -23,3 +23,8 @@ opencode.json
 *.zip
 *.bak
 *.tmp
+
+# Banco de dados está no Supabase: nenhum SQL/migration sai do ambiente local.
+*.sql
+supabase/migrations/
+supabase/.temp/

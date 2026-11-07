@@ -1,5 +1,5 @@
-import { getSupabase } from './supabaseClient.js';
-import { getExtension } from './fileValidator.js';
+import { getSupabase } from './supabaseClient.ts';
+import { getExtension } from './fileValidator.ts';
 
 export const STORAGE_BUCKET = 'avaliacoes-diretores-planilhas';
 

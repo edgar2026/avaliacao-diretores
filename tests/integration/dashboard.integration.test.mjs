@@ -3,8 +3,8 @@
 import './loadEnv.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { getSupabase } from '../../src/services/supabaseClient.js';
-import { loadPublishedDashboard, buildDashboardModel, matrixPeriodColumns, filterMatrixRows, buildPeriodLabelMap } from '../../src/services/dashboardService.js';
+import { getSupabase } from '../../src/services/supabaseClient.ts';
+import { loadPublishedDashboard, buildDashboardModel, matrixPeriodColumns, filterMatrixRows, buildPeriodLabelMap } from '../../src/services/dashboardService.ts';
 
 const configured = Boolean(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL)
   && Boolean(process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY);

@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   CAMPOS_INDICADORES,
   CAMPOS_NOTA,
@@ -7,11 +7,11 @@ import {
   mesmoValorIndicador,
   parseValorIndicador,
   salvarAjustesIndicadores
-} from '../../services/indicadoresAjustesService.js';
-import { formatMetricCell, recordMetric } from '../../services/dashboardService.js';
+} from '../../services/indicadoresAjustesService.ts';
+import { formatMetricCell, recordMetric } from '../../services/dashboardService.ts';
 import type { Registro } from '../../types/modelo';
 import type { AjusteIndicadorRow } from '../../types/supabase';
-import type { CampoIndicador } from '../../services/indicadoresAjustesService.js';
+import type { CampoIndicador } from '../../services/indicadoresAjustesService.ts';
 
 // Resultado entregue ao chamador após a confirmação do banco (o modelo em
 // memória é atualizado na hora — cards, radar e matriz mudam sem F5).
