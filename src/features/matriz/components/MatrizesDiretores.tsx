@@ -640,57 +640,61 @@ export default function MatrizesDiretores({
                   <span className="md-badge">{currentSource.length}</span>
                 </div>
                 <div className="md-director-list">
-                  {currentSource.map((director) => {
-                    const isSel =
-                      selectedDirector &&
-                      director.name.toLowerCase() === selectedDirector.toLowerCase();
-                    const chaveDir = normalizarChave(director.name);
-                    const infoDesta =
-                      infoAberta?.chave === chaveDir && infoAberta.origem === 'mov';
-                    return (
-                      <div
-                        className={`md-director ${draggedId === director.id ? 'dragging' : ''} ${
-                          isSel ? 'md-highlighted' : ''
-                        }`}
-                        draggable
-                        key={director.id}
-                        title={
-                          infoDesta
-                            ? undefined
-                            : [`${director.name} • ${director.unit}`, director.origemDetalhe]
-                                .filter(Boolean)
-                                .join('\n')
-                        }
-                        data-origem={director.origem || 'automatica'}
-                        tabIndex={0}
-                        aria-describedby={infoDesta ? 'md-info-card' : undefined}
-                        onPointerEnter={(event) => aoEntrarInfo(event, 'mov', director)}
-                        onPointerLeave={aoSairInfo}
-                        onPointerDown={aoBaixarInfo}
-                        onFocus={(event) => aoFocarInfo(event, 'mov', director)}
-                        onBlur={aoDesfocarInfo}
-                        onClick={(event) => aoClicarInfo(event, 'mov', director)}
-                        onDragStart={(event) => {
-                          // Arraste inicia: o informativo some na hora (não
-                          // acompanha o ponteiro durante o movimento).
-                          fecharInfo();
-                          setDraggedId(director.id);
-                          event.dataTransfer.effectAllowed = 'move';
-                          event.dataTransfer.setData('text/plain', director.id);
-                        }}
-                        onDragEnd={() => {
-                          setDraggedId(null);
-                          setDragOverIndex(null);
-                        }}
-                      >
-                        <span className="md-mini">{initials(director.name)}</span>
-                        <span>
-                          <b>{director.name}</b>
-                          <small>{director.unit}</small>
-                        </span>
-                      </div>
-                    );
-                  })}
+                  {currentSource.length ? (
+                    currentSource.map((director) => {
+                      const isSel =
+                        selectedDirector &&
+                        director.name.toLowerCase() === selectedDirector.toLowerCase();
+                      const chaveDir = normalizarChave(director.name);
+                      const infoDesta =
+                        infoAberta?.chave === chaveDir && infoAberta.origem === 'mov';
+                      return (
+                        <div
+                          className={`md-director ${draggedId === director.id ? 'dragging' : ''} ${
+                            isSel ? 'md-highlighted' : ''
+                          }`}
+                          draggable
+                          key={director.id}
+                          title={
+                            infoDesta
+                              ? undefined
+                              : [`${director.name} • ${director.unit}`, director.origemDetalhe]
+                                  .filter(Boolean)
+                                  .join('\n')
+                          }
+                          data-origem={director.origem || 'automatica'}
+                          tabIndex={0}
+                          aria-describedby={infoDesta ? 'md-info-card' : undefined}
+                          onPointerEnter={(event) => aoEntrarInfo(event, 'mov', director)}
+                          onPointerLeave={aoSairInfo}
+                          onPointerDown={aoBaixarInfo}
+                          onFocus={(event) => aoFocarInfo(event, 'mov', director)}
+                          onBlur={aoDesfocarInfo}
+                          onClick={(event) => aoClicarInfo(event, 'mov', director)}
+                          onDragStart={(event) => {
+                            // Arraste inicia: o informativo some na hora (não
+                            // acompanha o ponteiro durante o movimento).
+                            fecharInfo();
+                            setDraggedId(director.id);
+                            event.dataTransfer.effectAllowed = 'move';
+                            event.dataTransfer.setData('text/plain', director.id);
+                          }}
+                          onDragEnd={() => {
+                            setDraggedId(null);
+                            setDragOverIndex(null);
+                          }}
+                        >
+                          <span className="md-mini">{initials(director.name)}</span>
+                          <span>
+                            <b>{director.name}</b>
+                            <small>{director.unit}</small>
+                          </span>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="md-director-empty">Nenhum diretor nesta posição.</div>
+                  )}
                 </div>
               </section>
 
@@ -713,29 +717,39 @@ export default function MatrizesDiretores({
                       </aside>
                       <div className="md-mini-main">
                         <div className="md-mini-grid nine">
-                          {data.ninebox.map((group, i) => (
-                            <div
-                              className={`md-target md-${NINE_META[i].color} ${
-                                i === modal.sourceIndex ? 'origin' : ''
-                              } ${dragOverIndex === i ? 'over' : ''}`}
-                              key={`nine-mini-${i}`}
-                              onDragOver={(e) => {
-                                if (i !== modal.sourceIndex) {
+                          {data.ninebox.map((group, i) => {
+                            const isSelected = i === modal.sourceIndex;
+                            return (
+                              <div
+                                className={`md-target md-${NINE_META[i].color} ${
+                                  isSelected ? 'selected' : ''
+                                } ${dragOverIndex === i ? 'over' : ''}`}
+                                key={`nine-mini-${i}`}
+                                onClick={() => {
+                                  if (!draggedId && i !== modal.sourceIndex) {
+                                    setSuccess('');
+                                    setModal({ type: 'ninebox', sourceIndex: i });
+                                  }
+                                }}
+                                onDragOver={(e) => {
+                                  if (i !== modal.sourceIndex) {
+                                    e.preventDefault();
+                                    e.dataTransfer.dropEffect = 'move';
+                                    setDragOverIndex(i);
+                                  }
+                                }}
+                                onDragLeave={() => setDragOverIndex(null)}
+                                onDrop={(e) => {
                                   e.preventDefault();
-                                  e.dataTransfer.dropEffect = 'move';
-                                  setDragOverIndex(i);
-                                }
-                              }}
-                              onDragLeave={() => setDragOverIndex(null)}
-                              onDrop={(e) => {
-                                e.preventDefault();
-                                void moveDirector(i);
-                              }}
-                            >
-                              <span>{NINE_META[i].label}</span>
-                              <small>{group.length} diretores</small>
-                            </div>
-                          ))}
+                                  void moveDirector(i);
+                                }}
+                              >
+                                <span>{NINE_META[i].label}</span>
+                                <small>{group.length} diretores</small>
+                                {isSelected && <span className="md-selected-badge">Selecionado</span>}
+                              </div>
+                            );
+                          })}
                         </div>
                         <div className="md-mini-x-levels nine">
                           <div className="md-mini-x-level">ABAIXO DO ESPERADO</div>
@@ -758,33 +772,43 @@ export default function MatrizesDiretores({
                       </aside>
                       <div className="md-mini-main">
                         <div className="md-mini-grid risk">
-                          {data.risk.map((group, i) => (
-                            <div
-                              className={`md-target md-${RISK_COLORS[i]} ${
-                                i === modal.sourceIndex ? 'origin' : ''
-                              } ${dragOverIndex === i ? 'over' : ''}`}
-                              key={`risk-mini-${i}`}
-                              onDragOver={(e) => {
-                                if (i !== modal.sourceIndex) {
-                                  e.preventDefault();
-                                  e.dataTransfer.dropEffect = 'move';
-                                  setDragOverIndex(i);
-                                }
-                              }}
-                              onDragLeave={() => setDragOverIndex(null)}
-                              onDrop={(e) => {
-                                e.preventDefault();
-                                void moveDirector(i);
-                              }}
-                            >
-                              <span
-                                dangerouslySetInnerHTML={{
-                                  __html: `Risco ${RISK_Y[Math.floor(i / 4)]}<br>Dano ${RISK_X[i % 4]}`,
+                          {data.risk.map((group, i) => {
+                            const isSelected = i === modal.sourceIndex;
+                            return (
+                              <div
+                                className={`md-target md-${RISK_COLORS[i]} ${
+                                  isSelected ? 'selected' : ''
+                                } ${dragOverIndex === i ? 'over' : ''}`}
+                                key={`risk-mini-${i}`}
+                                onClick={() => {
+                                  if (!draggedId && i !== modal.sourceIndex) {
+                                    setSuccess('');
+                                    setModal({ type: 'risk', sourceIndex: i });
+                                  }
                                 }}
-                              />
-                              <small>{group.length} diretores</small>
-                            </div>
-                          ))}
+                                onDragOver={(e) => {
+                                  if (i !== modal.sourceIndex) {
+                                    e.preventDefault();
+                                    e.dataTransfer.dropEffect = 'move';
+                                    setDragOverIndex(i);
+                                  }
+                                }}
+                                onDragLeave={() => setDragOverIndex(null)}
+                                onDrop={(e) => {
+                                  e.preventDefault();
+                                  void moveDirector(i);
+                                }}
+                              >
+                                <span
+                                  dangerouslySetInnerHTML={{
+                                    __html: `Risco ${RISK_Y[Math.floor(i / 4)]}<br>Dano ${RISK_X[i % 4]}`,
+                                  }}
+                                />
+                                <small>{group.length} diretores</small>
+                                {isSelected && <span className="md-selected-badge">Selecionado</span>}
+                              </div>
+                            );
+                          })}
                         </div>
                         <div className="md-mini-x-levels risk">
                           <div className="md-mini-x-level">BAIXO</div>
