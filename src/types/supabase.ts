@@ -101,3 +101,37 @@ export interface ObservacaoRow {
   updated_at?: string | null;
   arquivada_em?: string | null;
 }
+
+// Tabela `avaliacoes_diretores_matriz_movimentacoes` — movimentações MANUAIS
+// das matrizes (Ninebox e Matriz Risco × Dano) com vigência por período.
+// Uma linha = um arraste registrado; `arquivada_em` nulo = vigente (única por
+// matriz+diretor) e `encerrado_motivo` guarda por que a vigência terminou
+// ('novo_periodo' | 'substituida'). Nenhuma linha é apagada: o histórico por
+// matriz e período permanece com a posição automática, a anterior, a manual,
+// o Status/Nível usados e a referência do período.
+export interface MovimentacaoMatrizRow {
+  id: string;
+  avaliacao_id?: string | null;
+  registro_id: string;
+  periodo_id?: string | null;
+  /** Qual matriz foi movimentada (nunca uma altera a outra). */
+  matriz: 'ninebox' | 'risk';
+  diretor: string;
+  /** Nome do diretor normalizado — chave da vigência por matriz+diretor. */
+  diretor_chave: string;
+  referencia?: string | null;
+  periodo_ano?: number | null;
+  periodo_mes?: number | null;
+  status_usado?: string | null;
+  nivel_usado?: string | null;
+  posicao_automatica: number;
+  posicao_anterior: number;
+  posicao_manual: number;
+  origem?: string | null;
+  encerrado_motivo?: string | null;
+  arquivada_em?: string | null;
+  criado_por?: string | null;
+  atualizado_por?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}

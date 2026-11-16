@@ -24,7 +24,7 @@ export function getSupabase(): SupabaseClient {
   }
   if(!client){
     client = createClient(url as string, anonKey as string, {
-      auth:{ persistSession:false, autoRefreshToken:false, detectSessionInUrl:false },
+      auth:{ persistSession:true, autoRefreshToken:true, detectSessionInUrl:true },
       global:{ headers:{ 'x-application-module':'avaliacoes-diretores' } }
     });
   }

@@ -1,0 +1,73 @@
+/* Card informativo do diretor — posicionado por JS com position: fixed.
+   Prefixo md-info-* para não tocar em nenhum estilo existente. */
+.md-info-card {
+  position: fixed;
+  z-index: 1200;
+  width: 268px;
+  box-sizing: border-box;
+  background: #fff;
+  border: 1px solid #cfdde6;
+  border-radius: 12px;
+  padding: 14px;
+  box-shadow: 0 10px 26px rgba(21, 55, 68, 0.18);
+  color: #153744;
+  font-family: Inter, Arial, sans-serif;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.md-info-linha {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.md-info-rotulo {
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.md-info-valor {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: #153744;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.md-info-forte {
+  font-weight: 700;
+}
+
+/* Etiqueta de Status — mesma família de cores do gráfico de evolução. */
+.md-info-badge {
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 3px 9px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.md-info-st-supervisao { background: #ef4444; color: #fff; }
+.md-info-st-gestao { background: #facc15; color: #422006; }
+.md-info-st-delegacao { background: #22c55e; color: #fff; }
+.md-info-st-neutro { background: #64748b; color: #fff; }
+
+/* Motivo de "Aguardando classificação" — só nas listas de aguardar. */
+.md-info-motivo {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px dashed #dbe5ea;
+  margin-top: 2px;
+  padding-top: 8px;
+}

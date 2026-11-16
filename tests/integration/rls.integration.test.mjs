@@ -54,6 +54,40 @@ test('Storage não permite remover arquivos (sem criar dados)', { skip }, async 
   assert.ok(Array.isArray(root));
 });
 
+test('Movimentação manual das matrizes: leitura ok; DELETE e UPDATE restrito negados', { skip }, async () => {
+  const supabase = getSupabase();
+  const T = 'avaliacoes_diretores_matriz_movimentacoes';
+
+  // Contagem antes das sondagens (nenhuma delas cria linha).
+  const antes = await supabase.from(T).select('id', { count: 'exact', head: true });
+
+  // Leitura: vigência + histórico são expostos ao papel anon.
+  const { data, error } = await supabase.from(T).select('id, matriz, posicao_manual, arquivada_em').limit(1);
+  assert.ifError(error);
+  assert.ok(Array.isArray(data));
+
+  // DELETE físico: sem política => negado (arquivamento é lógico).
+  const del = await supabase.from(T).delete().eq('id', DUMMY);
+  assert.ok(del.error, 'DELETE deve ser negado');
+
+  // UPDATE fora do conjunto permitido (posicao_manual) => negado por privilégio
+  // de coluna, mesmo sem linha correspondente.
+  const updPos = await supabase.from(T)
+    .update({ posicao_manual: 8 }).eq('id', DUMMY).select('id');
+  assert.ok(updPos.error, 'UPDATE de posicao_manual deve ser negado');
+
+  // UPDATE do conjunto permitido (encerramento da vigência) => aceito e, como
+  // o id não existe, nenhuma linha é alterada.
+  const updArq = await supabase.from(T)
+    .update({ encerrado_motivo: 'novo_periodo' }).eq('id', DUMMY).select('id');
+  assert.ifError(updArq.error);
+  assert.equal((updArq.data || []).length, 0, 'nenhuma linha alterada');
+
+  // Nada foi criado nem apagado.
+  const depois = await supabase.from(T).select('id', { count: 'exact', head: true });
+  assert.equal(depois.count, antes.count, 'sondagens sem resíduo');
+});
+
 test('nenhum resíduo: módulo segue vazio após sondagens', { skip }, async () => {
   const supabase = getSupabase();
   const { count } = await supabase.from('avaliacoes_diretores')

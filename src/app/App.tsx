@@ -12,13 +12,21 @@ import EditorPeriodo from '../features/dashboard/EditorPeriodo.tsx';
 import PeriodosManuais from '../features/matriz/PeriodosManuais.tsx';
 import ErrorBoundary from '../components/ErrorBoundary.tsx';
 import PerformanceMatrix from '../features/matriz/PerformanceMatrix.tsx';
+import MatrizesDiretores, { type MatrixDirector, type MatrixMove, rotuloCelula } from '../features/matriz/components/MatrizesDiretores.tsx';
+import AuthDemo from '../features/auth/AuthDemo.tsx';
+import { useAuth } from '../features/auth/context/AuthContext.tsx';
+import { AUTH_ENABLED } from '../features/auth/config/authConfig.ts';
+import GerenciarUsuarios from '../features/usuarios/GerenciarUsuarios.tsx';
+import { montarMatrizesClassificadas, nomeDiretorValido } from '../services/classificacaoMatrizService.ts';
+import { montarInfoDiretores } from '../features/matriz/components/infoDiretores.ts';
+import { montarReferenciasPeriodo, aplicarMovimentos, marcarOrigens, prepararMovimentacaoMatriz, salvarMovimentacaoMatriz, listarMovimentacoesAtivas } from '../services/matrizMovimentacoesService.ts';
 import Pareceres from '../features/pareceres/Pareceres.tsx';
 import {MonthlyEvolutionChart,RadarChart} from '../features/dashboard/Charts.tsx';
 import CapturaEvolucaoPdf from '../features/dashboard/CapturaEvolucaoPdf.tsx';
 import ConfirmModal from '../components/ConfirmModal.tsx';
 import {montarItensEvolucaoPdf,nomeArquivoEvolucaoPdf,larguraAreaCaptura,capturarAreaPdf,criarDocumentoPdf,adicionarPaginaCapturada,adicionarPaginaAvisoPdf,finalizarDocumentoPdf,comTempoLimite,dormir,opcaoCapturaPorEscopo,type EscopoEvolucaoPdf,type ItemEvolucaoPdf,type ResumoEvolucaoPdf,type ImagemCapturada,type DocEvolucaoPdf} from '../services/evolucaoPdfService.ts';
 import type {DashboardModel} from '../types/modelo';
-import type {AjusteRow} from '../types/supabase';
+import type {AjusteRow,MovimentacaoMatrizRow} from '../types/supabase';
 import type {AvaliacaoHashInfo} from '../services/avaliacoesService.ts';
 import type {ResultadoPeriodosManuais} from '../features/matriz/PeriodosManuais.tsx';
 const avg=a=>avgNumbers(a);
@@ -62,9 +70,18 @@ const TEMPO_PAGINA_MS=15000;
 const PAUSA_ENTRE_PAGINAS_MS=50;
 
 export default function App(){
- const [model,setModel]=useState<DashboardModel|null>(null),[loading,setLoading]=useState(true),[loadError,setLoadError]=useState(''),
+  const { perfil, loading: authLoading, logout, reloadPerfil } = useAuth();
+  const [viewMode, setViewMode] = useState<'auth' | 'system' | 'usuarios'>('system');
+  const [model,setModel]=useState<DashboardModel|null>(null),[loading,setLoading]=useState(true),[loadError,setLoadError]=useState(''),
   [regional,setRegional]=useState(''),[director,setDirector]=useState(''),
   [message,setMessage]=useState(''),[pendingImport,setPendingImport]=useState<PendenteImport|null>(null);
+  // Posições manuais das matrizes (Ninebox e Risco × Dano) lidas do banco —
+  // camada adicional sobre a classificação automática, com vigência por
+  // período. NADA é persistido em localStorage (só o servidor).
+  const [movimentacoes,setMovimentacoes]=useState<MovimentacaoMatrizRow[]>([]);
+  // Re-sincronismo forçado: quando o banco NÃO confirma um arraste, a tela
+  // volta à distribuição persistida (desfaz o movimento otimista).
+  const [movSincronismo,setMovSincronismo]=useState(0);
   // A antiga área de OBSERVAÇÕES da lateral foi removida (título “Observação do
   // regional”, campo de texto, botão “Salvar observação”, título/lista
   // “Observações do regional” e a mensagem “Nenhuma observação registrada.”):
@@ -95,10 +112,28 @@ export default function App(){
 
  // Sem variáveis de ambiente o usuário vê uma mensagem clara de configuração
  // ausente (nunca tela branca, nunca dados de exemplo carregados sozinhos).
- async function reload(){setLoading(true);setLoadError('');try{if(!isSupabaseConfigured())throw new Error('Configuração ausente: as variáveis de ambiente do sistema de dados não foram definidas neste ambiente.');const raw=await loadPublishedDashboard();setModel(buildDashboardModel(raw) as DashboardModel);}catch(err){console.error('[avaliacao-diretores] Falha ao carregar o dashboard:', err?.message||String(err));setLoadError(err?.message||String(err));}finally{setLoading(false);}}
+ async function reload(){setLoading(true);setLoadError('');try{if(!isSupabaseConfigured())throw new Error('Configuração ausente: as variáveis de ambiente do sistema de dados não foram definidas neste ambiente.');const raw=await loadPublishedDashboard();setModel(buildDashboardModel(raw) as DashboardModel);
+  // Posições manuais vigentes das matrizes: camada adicional e tolerante — se
+  // a consulta falhar (ex.: tabela ainda não criada), a tela continua apenas
+  // com a classificação automática e as posições já conhecidas são mantidas.
+  try{setMovimentacoes(await listarMovimentacoesAtivas());}catch(err){console.warn('[avaliacao-diretores] Movimentações manuais das matrizes indisponíveis, usando apenas a classificação automática:',(err as Error)?.message||String(err));}
+  }catch(err){console.error('[avaliacao-diretores] Falha ao carregar o dashboard:', err?.message||String(err));setLoadError(err?.message||String(err));}finally{setLoading(false);}}
  useEffect(()=>{reload()},[]);
 
- const allRecords=model?.registros||[];
+ const allRecords = useMemo(() => {
+    const raw = model?.registros || [];
+    if (!AUTH_ENABLED) return raw;
+    if (perfil?.perfil === 'diretor' && perfil.unidade_id) {
+      return raw.filter(r => r.unidade === perfil.unidade_id);
+    }
+    if (perfil?.perfil === 'regional' && perfil.regional_id) {
+      return raw.filter(r => r.regional === perfil.regional_id);
+    }
+    return raw;
+  }, [model, perfil]);
+
+  const podeAcessarMatrizes = !AUTH_ENABLED || !perfil || perfil.perfil === 'executivo' || perfil.perfil === 'admin';
+  const podeFazerUpload = !AUTH_ENABLED || !perfil || perfil.perfil !== 'diretor';
  const regionals=useMemo(()=>regionalsOf(allRecords),[model]);
  const directors=useMemo(()=>directorsOf(allRecords,regional),[model,regional]);
   const visible=useMemo(()=>allRecords.filter(r=>(!regional||r.regional===regional)&&(!director||r.diretor===director)),[model,regional,director]);
@@ -126,6 +161,75 @@ export default function App(){
     for(const r of visible){const u=String(r.unidade||'').replace(/\s+/g,' ').trim();if(u)s.add(u);}
     return [...s];
   },[visible]);
+
+  // Diretores ativos para as Matrizes de Diretores (Ninebox e Matriz Risco × Dano):
+  // fonte PRÓPRIA e GLOBAL dessas duas matrizes — TODOS os registros ativos da
+  // base, independentemente dos filtros laterais (Regional/Diretor não reduzem
+  // nem escondem diretor das matrizes), sem nomes inválidos ("Diretor não
+  // informado", vazio ou só espaços), sem duplicatas e sem diretores
+  // arquivados/inativos.
+  const matrizDiretores = useMemo<MatrixDirector[]>(() => {
+    if (!model?.registros) return [];
+    const map = new Map<string, MatrixDirector>();
+    for (const r of model.registros) {
+      if (r.arquivado || !nomeDiretorValido(r.diretor)) continue;
+      const nome = r.diretor.trim();
+      if (!map.has(nome)) {
+        map.set(nome, {
+          id: r.id,
+          name: nome,
+          unit: r.unidade?.trim() || 'Não informado',
+        });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  }, [model?.registros]);
+
+  // MOTOR DE CLASSIFICAÇÃO AUTOMÁTICA das duas matrizes (Ninebox e Risco ×
+  // Dano): fonte de dados PRÓPRIA — base COMPLETA (todos os diretores ativos,
+  // sem filtro lateral) e, para CADA diretor individualmente, o último
+  // Status VIGENTE do último período válido (ajuste manual > cadastro manual >
+  // valor importado; diretor sem avaliação no período mais recente usa o
+  // último período anterior válido do PRÓPRIO diretor) alimenta as regras
+  // centralizadas por Status: Acompanhamento e Supervisão I/II classificam sem
+  // exigir Nível; Reposicionamento exclui o diretor das DUAS matrizes (fora
+  // de "Aguardando" e das contagens); Gestão/Delegação exigem Nível. Só sem
+  // período válido nem regra aplicável cai em "Aguardando classificação".
+  // Nada é lido de nome de pessoa, status de gestão, ciclo de vida, nível da
+  // unidade, notas, indicadores, pareceres ou justificativas. Os filtros
+  // laterais continuam valendo para os demais componentes (indicadores,
+  // gráficos, pareceres, Matriz Histórica, etc.).
+  const matrizesClassificadas = useMemo(() => {
+    if (!model) return null;
+    const r = montarMatrizesClassificadas(matrizDiretores, model.registros, model.avaliacoes);
+    // POSIÇÃO MANUAL COM VIGÊNCIA: a referência do último período de cada
+    // diretor vem da base COMPLETA do modelo (o filtro lateral nunca encerra
+    // nem cria vigência) e as duas matrizes aplicam os seus movimentos de
+    // forma INDEPENDENTE — uma movimentação na Ninebox não toca a Risco ×
+    // Dano (e vice-versa). A distribuição automática do motor permanece
+    // intacta; quem tem movimentação vigente aparece na célula manual e é
+    // identificado como "Alterada manualmente" (quem não tem, "Automática").
+    const referencias = montarReferenciasPeriodo(model.registros, model.avaliacoes);
+    const comManuais = aplicarMovimentos(r.ninebox, r.risk, movimentacoes, referencias);
+    return {
+      initialData: {
+        ninebox: marcarOrigens(comManuais.ninebox, 'ninebox', movimentacoes, referencias, r.detalhes, rotuloCelula),
+        risk: marcarOrigens(comManuais.risk, 'risk', movimentacoes, referencias, r.detalhes, rotuloCelula)
+      },
+      aguardando: { ninebox: r.aguardandoNinebox, risk: r.aguardandoRisco },
+      detalhes: r.detalhes,
+      referencias
+    };
+  }, [model, matrizDiretores, movimentacoes, movSincronismo]);
+
+  // CARD INFORMATIVO dos diretores (hover/foco/toque nas matrizes): conteúdo
+  // montado UMA vez a partir dos dados em memória — Regional/Unidade do
+  // registro ativo e Referência/Status/Nível do MESMO último período válido
+  // usado na classificação (nada é consultado ao passar o mouse).
+  const infoCards = useMemo(() => {
+    if (!model || !matrizesClassificadas) return null;
+    return montarInfoDiretores(model.registros, model.avaliacoes, matrizesClassificadas.detalhes);
+  }, [model, matrizesClassificadas]);
 
   // Resumo do ÚLTIMO PONTO VÁLIDO da linha (o mesmo ponto que o gráfico
   // desenha): rótulo ORIGINAL do período, status daquele período e nível
@@ -331,6 +435,29 @@ export default function App(){
     }
   }
 
+  // MOVIMENTAÇÃO MANUAL em UMA das matrizes (arraste confirmado pelo
+  // componente): grava a decisão manual no banco vinculada ao período mais
+  // recente usado no cálculo — a posição AUTOMÁTICA nunca é alterada, a
+  // posição manual anterior vira histórico e a outra matriz não é tocada.
+  // O modelo de exibição só muda DEPOIS que o banco confirma; se a gravação
+  // falhar, movSincronismo força a releitura e a tela volta à distribuição
+  // persistida (o movimento otimista é desfeito, sem dado fantasma).
+  async function aoMovimentarMatriz(move: MatrixMove){
+    if(!model||!matrizesClassificadas)return;
+    try{
+      const payload=prepararMovimentacaoMatriz(move,matrizesClassificadas.detalhes,matrizesClassificadas.referencias,model.registros);
+      const {movimento}=await salvarMovimentacaoMatriz(payload);
+      // Relê as vigentes do banco (fonte da verdade) — memo recalcula e o
+      // componente converge para a mesma distribuição.
+      setMovimentacoes(await listarMovimentacoesAtivas());
+      const nomeMatriz=move.type==='ninebox'?'Ninebox':'Matriz Risco × Dano';
+      setMessage(`Posição manual registrada na ${nomeMatriz}: ${move.directorName} → ${rotuloCelula(move.type,movimento.posicao_manual)} (${movimento.referencia||'período atual'}).`);
+    }catch(err){
+      setMessage(`Erro ao registrar a posição manual: ${humanError(err?.message||String(err))}`);
+      setMovSincronismo(v=>v+1);
+    }
+  }
+
   // Paleta do subcard do resumo (PALETAS_STATUS da tela) para a área isolada
   // de captura: as MESMAS variáveis --ev-* do card exibido, sem tocar no
   // componente nem no layout da aplicação.
@@ -416,13 +543,70 @@ export default function App(){
   // cabeçalho (remoção somente visual: nenhuma avaliação apagada, nenhuma
   // consulta alterada). Os cards de pareceres ocupam a área entre o último
   // gráfico (Evolução mensal) e a Matriz histórica de desempenho.
+  if (AUTH_ENABLED && authLoading) {
+    return (
+      <div className="auth-page">
+        <div className="auth-spinner" style={{ width: '40px', height: '40px' }} />
+      </div>
+    );
+  }
+
+  if (AUTH_ENABLED && !perfil) {
+    return <AuthDemo onEnterSystem={async () => { await reloadPerfil(); }} />;
+  }
+
+  if (AUTH_ENABLED && viewMode === 'usuarios' && perfil?.perfil === 'admin') {
+    return (
+      <GerenciarUsuarios
+        onVoltar={() => setViewMode('system')}
+        regionaisDisponiveis={regionals}
+        unidadesDisponiveis={Array.from(new Set((model?.registros || []).map(r => r.unidade).filter(Boolean))) as string[]}
+        diretoresDisponiveis={Array.from(new Set((model?.registros || []).map(r => r.diretor).filter(Boolean))) as string[]}
+      />
+    );
+  }
+
   return <div className="app">
   <aside className="sidebar"><div className="brand"><img className="brand-logo" src="/assets/logo-diretores.png" alt="SER Educacional — logo da Avaliação de Diretores"/><span className="brand-title">Avaliação de Diretores</span></div><div className="sub">Avaliação de desempenho dos diretores</div>
-   <input ref={fileRef} hidden type="file" accept=".xlsx,.xls" onChange={upload}/><button className="upload" onClick={()=>fileRef.current.click()}><span>↑</span> Atualizar pela planilha</button>
+   {!AUTH_ENABLED && import.meta.env.DEV && (
+     <div style={{ marginBottom: '14px', padding: '6px 10px', borderRadius: '6px', background: 'rgba(8,127,149,0.12)', border: '1px dashed rgba(8,127,149,0.3)', fontSize: '11px', color: '#9ee8f5', textAlign: 'center' }}>
+       Autenticação temporariamente desativada
+     </div>
+   )}
+   {AUTH_ENABLED && perfil && (
+     <div className="profile" style={{ marginBottom: '14px', background: 'rgba(8,127,149,0.18)', borderColor: 'rgba(8,127,149,0.35)' }}>
+       <b style={{ color: '#fff', fontSize: '13px' }}>{perfil.nome}</b>
+       <span style={{ color: '#9ee8f5', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '3px' }}>
+         {perfil.perfil} {perfil.unidade_id ? `· ${perfil.unidade_id}` : ''}
+       </span>
+       {perfil.perfil === 'admin' && (
+         <button
+           type="button"
+           className="mx-btn"
+           style={{ marginTop: '10px', width: '100%', fontSize: '11.5px', background: 'rgba(255,255,255,0.15)', color: '#fff', borderColor: 'rgba(255,255,255,0.25)' }}
+           onClick={() => setViewMode('usuarios')}
+         >
+           👥 Gerenciar Usuários
+         </button>
+       )}
+       <button
+         type="button"
+         className="mx-btn"
+         style={{ marginTop: '6px', width: '100%', fontSize: '11.5px', background: 'transparent', color: '#ffb3b3', borderColor: 'rgba(255,100,100,0.35)' }}
+         onClick={logout}
+       >
+         Sair da Conta
+       </button>
+     </div>
+   )}
+   {podeFazerUpload && (
+     <><input ref={fileRef} hidden type="file" accept=".xlsx,.xls" onChange={upload}/><button className="upload" onClick={()=>fileRef.current.click()}><span>↑</span> Atualizar pela planilha</button></>
+   )}
    <label>Regional</label><select value={regional} onChange={e=>{setRegional(e.target.value);setDirector('')}} disabled={!model}><option value="">Todas as regionais</option>{regionals.map(x=><option key={x}>{x}</option>)}</select>
    <label>Diretor</label><select value={director} onChange={e=>setDirector(e.target.value)} disabled={!regional}><option value="">Todos os diretores</option>{directors.map(x=><option key={x}>{x}</option>)}</select>
    <button type="button" className="upload baixar-pdf" onClick={abrirConfirmacaoPdf} disabled={!model||loading||!!pdfExecucao||countDistinctNames(visible,'diretor')===0}>Baixar PDF</button>
     <div className="profile"><b>{director||regional||'Todas as regionais'}</b><span>{visible.length} registro(s) · {countDistinctNames(visible,'diretor')} diretor(es) · {(model?.avaliacoes?.length)||0} avaliação(ões)</span></div>
+
    {message&&<div className="message">{message}</div>}
   </aside>
   <ErrorBoundary>
@@ -459,6 +643,19 @@ export default function App(){
       {/* Pareceres (JUSTIFICATIVA + Parecer de Operações) entre o último
           gráfico e a Matriz histórica — apenas mudança de posição na página. */}
       <Pareceres regional={regional} diretor={director} registros={model.registros} avaliacoes={model.avaliacoes}/>
+      {/* Novas Matrizes de Diretores (Ninebox e Matriz Risco × Dano) —
+          distribuição automática pelo motor + posição manual com vigência por
+          período (gravada no banco; cada matriz é independente). */}
+      {podeAcessarMatrizes && (
+        <MatrizesDiretores
+          initialData={matrizesClassificadas?.initialData}
+          aguardando={matrizesClassificadas?.aguardando}
+          infoCards={infoCards}
+          selectedDirector={director}
+          persistLocally={false}
+          onDirectorMove={aoMovimentarMatriz}
+        />
+      )}
       <section className="card"><h2>Matriz histórica de desempenho</h2><p>Reprodução da planilha original: histórico por período, situação atual e indicadores.</p><PerformanceMatrix records={visible} allRecords={allRecords} avaliacoes={model.avaliacoes} podeAtualizarDados={!!director} onAtualizarDados={()=>setPeriodosAberto(true)}/></section>
     </div>
    </>}

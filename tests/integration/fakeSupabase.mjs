@@ -37,7 +37,10 @@ export function createFakeSupabase(){
     async function exec(){
       const rows = getTable(table);
       if(s.op === 'insert'){
-        const copies = s.rows.map(r => ({ ...r }));
+        // Como no Postgres: toda linha inserida ganha id (gen_random_uuid)
+        // quando o caller não informa — sem isso, filtros .eq('id', ...)
+        // casariam com linhas sem id.
+        const copies = s.rows.map(r => ({ id: globalThis.crypto.randomUUID(), ...r }));
         rows.push(...copies);
         return { data: s.single ? (copies[0] ?? null) : copies, error:null };
       }
